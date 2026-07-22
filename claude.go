@@ -22,6 +22,8 @@ func New(opts ...Option) (*Client, error) {
 	switch c.backendKind {
 	case "sdk":
 		b = newSDKBackend(c)
+	case "cli":
+		b, err = newCLIBackend(c)
 	default:
 		return nil, ErrNoBackend
 	}
