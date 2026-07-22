@@ -9,7 +9,7 @@ See `tasks/plan.md` for acceptance criteria + verification detail.
 - [ ] ⛳ **CHECKPOINT 1** — SDK flavor end-to-end; review public API shape ← **HERE**
 
 ## Phase B — CLI non-streaming + parity
-- [ ] **T3** `cliBackend.messages` + injectable `commandRunner` + fake-runner tests
+- [x] **T3** `cliBackend.messages` + injectable `commandRunner` + fake-runner tests
 - [ ] **T4** `contract_test.go` — non-streaming parity across both backends
 - [ ] ⛳ **CHECKPOINT 2** — both flavors reach parity (non-streaming)
 
