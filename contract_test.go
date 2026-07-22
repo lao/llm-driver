@@ -28,10 +28,10 @@ func TestContractNonStreaming(t *testing.T) {
 	cases := []struct {
 		name    string
 		client  *Client
-		backend string
+		backend Backend
 	}{
-		{"sdk", sdkClient, "sdk"},
-		{"cli", cliClient, "cli"},
+		{"sdk", sdkClient, BackendSDK},
+		{"cli", cliClient, BackendCLI},
 	}
 
 	for _, tc := range cases {

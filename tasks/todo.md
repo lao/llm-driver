@@ -10,8 +10,8 @@ See `tasks/plan.md` for acceptance criteria + verification detail.
 
 ## Phase B — CLI non-streaming + parity
 - [x] **T3** `cliBackend.messages` + injectable `commandRunner` + fake-runner tests
-- [ ] **T4** `contract_test.go` — non-streaming parity across both backends
-- [ ] ⛳ **CHECKPOINT 2** — both flavors reach parity (non-streaming)
+- [x] **T4** `contract_test.go` — non-streaming parity across both backends
+- [ ] ⛳ **CHECKPOINT 2** — both flavors reach parity (non-streaming) ← **HERE**
 
 ## Phase C — Streaming
 - [ ] **T5** `stream.go` + `sdkBackend.streamMessages` + `NewStreaming`; SSE httptest test

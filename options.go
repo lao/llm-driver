@@ -72,7 +72,9 @@ func WithCLIPath(path string) CLIOption {
 }
 
 // WithCLIExtraArgs appends verbatim arguments to every CLI invocation. Escape
-// hatch for flags the library does not model; use with care.
+// hatch for flags the library does not model; use with care. Args are appended
+// after the library's own flags and can override them — passing, e.g.,
+// --output-format text will break JSON parsing of the result.
 func WithCLIExtraArgs(args ...string) CLIOption {
 	return func(c *config) { c.cliExtraArgs = append(c.cliExtraArgs, args...) }
 }

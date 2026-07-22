@@ -87,8 +87,14 @@ func (b *cliBackend) messages(ctx context.Context, p MessageParams) (*Response, 
 	if err := json.Unmarshal(stdout, &res); err != nil {
 		return nil, &Error{Backend: "cli", Op: "messages.new", Message: "invalid CLI JSON output", Err: err}
 	}
-	if res.IsError {
-		return nil, &Error{Backend: "cli", Op: "messages.new", Type: res.Subtype, Message: res.Result}
+	// Trust is_error, but also treat any non-success subtype as a failure so a
+	// payload that reports the error only via subtype is not read as success.
+	if res.IsError || (res.Subtype != "" && res.Subtype != "success") {
+		msg := res.Result
+		if msg == "" {
+			msg = "cli reported non-success result"
+		}
+		return nil, &Error{Backend: "cli", Op: "messages.new", Type: res.Subtype, Message: msg}
 	}
 
 	return &Response{
@@ -97,7 +103,7 @@ func (b *cliBackend) messages(ctx context.Context, p MessageParams) (*Response, 
 		Role:       RoleAssistant,
 		Content:    []ContentBlock{TextBlock(res.Result)},
 		StopReason: StopReason(res.StopReason),
-		Backend:    "cli",
+		Backend:    BackendCLI,
 		Usage: Usage{
 			InputTokens:         res.Usage.InputTokens,
 			OutputTokens:        res.Usage.OutputTokens,

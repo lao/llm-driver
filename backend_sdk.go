@@ -91,7 +91,7 @@ func fromSDKMessage(m *anthropic.Message) *Response {
 		Model:      string(m.Model),
 		Role:       Role(m.Role),
 		StopReason: StopReason(m.StopReason),
-		Backend:    "sdk",
+		Backend:    BackendSDK,
 		Usage: Usage{
 			InputTokens:         int(m.Usage.InputTokens),
 			OutputTokens:        int(m.Usage.OutputTokens),
@@ -118,12 +118,13 @@ func fromSDKMessage(m *anthropic.Message) *Response {
 // sdkError wraps an anthropic-sdk-go error in a *Error, extracting status/type
 // when the cause is an *anthropic.Error.
 func sdkError(op string, err error) error {
-	e := &Error{Backend: "sdk", Op: op, Err: err, Message: err.Error()}
+	// Message stays empty: Error() already renders the wrapped cause via Err,
+	// so setting Message = err.Error() too would print it twice.
+	e := &Error{Backend: "sdk", Op: op, Err: err}
 	var apierr *anthropic.Error
 	if errors.As(err, &apierr) {
 		e.Status = apierr.StatusCode
 		e.Type = string(apierr.Type())
-		e.Message = ""
 	}
 	return e
 }

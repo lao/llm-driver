@@ -37,5 +37,5 @@ func New(opts ...Option) (*Client, error) {
 	}, nil
 }
 
-// Backend reports which flavor this client uses: "sdk" or "cli".
-func (c *Client) Backend() string { return c.Messages.backend.name() }
+// Backend reports which flavor this client uses.
+func (c *Client) Backend() Backend { return Backend(c.Messages.backend.name()) }

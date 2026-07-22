@@ -8,6 +8,14 @@ import (
 // DefaultModel is used when MessageParams.Model is empty.
 const DefaultModel = "claude-opus-4-8"
 
+// Backend names which flavor served a Response.
+type Backend string
+
+const (
+	BackendSDK Backend = "sdk"
+	BackendCLI Backend = "cli"
+)
+
 // Role identifies the author of a Message.
 type Role string
 
@@ -85,7 +93,8 @@ type MessageParams struct {
 	Metadata    map[string]string // optional
 }
 
-// Usage reports token accounting for a Response.
+// Usage reports token accounting for a Response. Counts are int (not int64):
+// token totals per request are far below the 32-bit limit on every model.
 type Usage struct {
 	InputTokens         int `json:"input_tokens"`
 	OutputTokens        int `json:"output_tokens"`
@@ -102,8 +111,8 @@ type Response struct {
 	StopReason StopReason     `json:"stop_reason"`
 	Usage      Usage          `json:"usage"`
 
-	// Backend records which flavor served this response: "sdk" or "cli".
-	Backend string `json:"backend"`
+	// Backend records which flavor served this response.
+	Backend Backend `json:"backend"`
 }
 
 // Text returns the concatenation of all BlockText content, ignoring other block
