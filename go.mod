@@ -1,4 +1,4 @@
-module github.com/lucasabreu/claudewrap
+module github.com/lao/claudewrap
 
 go 1.24
 

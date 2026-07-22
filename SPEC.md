@@ -5,7 +5,7 @@
 > `sdk` (HTTP, via the official `anthropic-sdk-go`) and `cli` (shells out to a
 > local `claude` Claude Code CLI). Same API, two flavors.
 
-- **Module:** `github.com/lucasabreu/claudewrap`
+- **Module:** `github.com/lao/claudewrap`
 - **Location:** `/Users/lucas/Projects/claudewrap`
 - **Status:** spec — awaiting approval before full implementation
 - **Go version:** 1.23
@@ -55,7 +55,7 @@ resp, err := c.Messages.New(ctx, claude.MessageParams{
 | 1 | API surface | **Messages API mirror** — `Messages.New` + `Messages.NewStreaming` |
 | 2 | Types | **Library-owned neutral types** — both backends map into them; `anthropic-sdk-go` types never appear in the public API |
 | 3 | Flavor selection | **Runtime**, via functional options (`WithSDK` / `WithCLI`); both backends compiled in |
-| 4 | Module path | `github.com/lucasabreu/claudewrap` |
+| 4 | Module path | `github.com/lao/claudewrap` |
 
 ---
 
