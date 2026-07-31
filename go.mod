@@ -1,4 +1,4 @@
-module github.com/lao/llmwrapper
+module github.com/lao/claudewrap
 
 go 1.24
 

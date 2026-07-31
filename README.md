@@ -15,7 +15,7 @@ Changing the provider, flavor, or model does not change application call sites.
 ## Install
 
 ```bash
-go get github.com/lao/llmwrapper
+go get github.com/lao/claudewrap
 ```
 
 The module requires Go 1.24 or later.
@@ -30,7 +30,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/lao/llmwrapper"
+	"github.com/lao/claudewrap"
 )
 
 func main() {

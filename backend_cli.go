@@ -95,7 +95,7 @@ func executeCLI(
 		if message == "" {
 			message = "CLI command failed"
 		}
-		return nil, &Error{
+		return stdout, &Error{
 			Provider:  provider,
 			Flavor:    FlavorCLI,
 			Operation: "generate",

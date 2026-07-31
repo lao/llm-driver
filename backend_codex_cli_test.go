@@ -126,11 +126,12 @@ func TestCodexCLIErrors(t *testing.T) {
 
 	launchFailure := errors.New("launch failed")
 	tests := []struct {
-		name       string
-		runner     *fakeCommandRunner
-		wantIs     error
-		wantStatus int
-		wantCode   string
+		name        string
+		runner      *fakeCommandRunner
+		wantIs      error
+		wantStatus  int
+		wantCode    string
+		wantMessage string
 	}{
 		{
 			name:   "missing executable",
@@ -146,6 +147,13 @@ func TestCodexCLIErrors(t *testing.T) {
 			name:       "nonzero exit",
 			runner:     &fakeCommandRunner{stderr: []byte("not authenticated\n"), exitCode: 9},
 			wantStatus: 9,
+		},
+		{
+			name:        "nonzero exit with failed turn diagnostic",
+			runner:      &fakeCommandRunner{stdout: []byte("{\"type\":\"turn.failed\",\"error\":{\"message\":\"model failed\"}}\n"), exitCode: 9},
+			wantStatus:  9,
+			wantCode:    "turn_failed",
+			wantMessage: "model failed",
 		},
 		{
 			name:   "malformed JSONL",
@@ -209,6 +217,9 @@ func TestCodexCLIErrors(t *testing.T) {
 			}
 			if target.Status != test.wantStatus || target.Code != test.wantCode {
 				t.Fatalf("status/code = %d/%q, want %d/%q", target.Status, target.Code, test.wantStatus, test.wantCode)
+			}
+			if test.wantMessage != "" && target.Message != test.wantMessage {
+				t.Fatalf("message = %q, want %q", target.Message, test.wantMessage)
 			}
 			if test.wantIs != nil && !errors.Is(err, test.wantIs) {
 				t.Fatalf("Generate() error = %v, want errors.Is(%v)", err, test.wantIs)

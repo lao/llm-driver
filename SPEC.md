@@ -2,9 +2,8 @@
 
 ## Objective
 
-Rename the Go module and package to `llmwrapper` and expose one small,
-provider-neutral API that can switch between four execution targets through
-configuration only:
+Rename the Go package to `llmwrapper` and expose one small, provider-neutral API
+that can switch between four execution targets through configuration only:
 
 | Provider | Flavor | Transport |
 | --- | --- | --- |
@@ -18,9 +17,9 @@ authenticated CLI and later use the corresponding hosted API—or switch
 providers—without changing application call sites. Only the `Config` values for
 provider, flavor, credentials, and model should change.
 
-This is a clean package rename. The new module path is
-`github.com/lao/llmwrapper`; no compatibility package or deprecated aliases for
-the former module are included.
+This is a clean package rename. The module path remains
+`github.com/lao/claudewrap` until the repository is renamed; no compatibility
+package or deprecated aliases for the former package are included.
 
 ### Public API
 
@@ -141,8 +140,8 @@ Out of scope for this PR:
 - Images, audio, files, web search, structured output, batches, or embeddings.
 - Conversation/session persistence.
 - Automatic fallback, routing, retries beyond SDK defaults, or model catalogs.
-- Renaming the GitHub repository itself; the code and module path prepare for
-  that separate repository setting change.
+- Renaming the GitHub repository or module path; those changes must be
+  coordinated separately.
 
 CLI transports are agent CLIs rather than byte-for-byte API equivalents. The
 implementation will use non-interactive, non-persistent modes and pass prompts
@@ -291,9 +290,9 @@ substitute for the cases above.
 
 ## Success Criteria
 
-- The module path is `github.com/lao/llmwrapper`, the root package is
-  `llmwrapper`, docs/examples use the new name, and no active code imports or
-  declares the former package/module name.
+- The module path is `github.com/lao/claudewrap`, the root package is
+  `llmwrapper`, docs/examples use the fetchable import path, and no active code
+  declares the former package name.
 - `New(Config)` accepts exactly the four documented provider/flavor pairs and
   returns clear validation errors for invalid configurations.
 - One unchanged `Generate` call works with each target when only `Config`
@@ -314,7 +313,7 @@ substitute for the cases above.
 
 ## Open Questions
 
-None. The four-target matrix, clean-break API, and
-`github.com/lao/llmwrapper` module path were approved on 2026-07-31. Until the
-GitHub repository setting is renamed separately, external consumers cannot
-fetch the new module path directly.
+None. The four-target matrix and clean-break API were approved on 2026-07-31.
+The module path remains `github.com/lao/claudewrap`; any future module-path
+change must be coordinated with the GitHub repository rename so external
+consumers can fetch it.

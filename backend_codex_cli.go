@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -79,6 +80,15 @@ func (b *codexCLIBackend) generate(ctx context.Context, request Request) (*Respo
 		b.runner,
 	)
 	if err != nil {
+		var processError *Error
+		if errors.As(err, &processError) && processError.Status != 0 {
+			_, diagnosticErr := parseCodexCLIOutput(stdout, b.model)
+			var diagnostic *Error
+			if errors.As(diagnosticErr, &diagnostic) && (diagnostic.Code == "turn_failed" || diagnostic.Code == "error") {
+				diagnostic.Status = processError.Status
+				return nil, diagnostic
+			}
+		}
 		return nil, err
 	}
 	return parseCodexCLIOutput(stdout, b.model)

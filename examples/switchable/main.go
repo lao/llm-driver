@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lao/llmwrapper"
+	"github.com/lao/claudewrap"
 )
 
 const defaultMaxTokens = 1024
