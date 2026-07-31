@@ -220,17 +220,17 @@ only expected provider/flavor identity differences.
 
 **Acceptance criteria:**
 
-- [ ] All four targets pass identical text, model, usage, validation, and
+- [x] All four targets pass identical text, model, usage, validation, and
       error-context assertions.
-- [ ] Construction tests prove all and only the approved provider/flavor matrix.
-- [ ] Any excluded transport behavior is documented inline and matches the spec.
+- [x] Construction tests prove all and only the approved provider/flavor matrix.
+- [x] Any excluded transport behavior is documented inline and matches the spec.
 
 **Verification:**
 
-- [ ] `go test ./... -run 'TestContract'`
-- [ ] `go test -race ./...`
-- [ ] `go test -cover ./...`
-- [ ] `git diff --check`
+- [x] `go test ./... -run 'TestContract'`
+- [x] `go test -race ./...`
+- [x] `go test -cover ./...`
+- [x] `git diff --check`
 
 **Dependencies:** Tasks 2–5.
 
