@@ -17,34 +17,51 @@ const (
 
 // Message is one text turn in a generation request.
 type Message struct {
-	Role Role   `json:"role"`
+	// Role identifies the user or assistant author.
+	Role Role `json:"role"`
+	// Text is the message's non-empty text content.
 	Text string `json:"text"`
 }
 
 // Request is a provider-neutral text generation request.
 type Request struct {
-	System    string    `json:"system,omitempty"`
-	Messages  []Message `json:"messages"`
-	MaxTokens int       `json:"max_tokens"`
+	// System is an optional instruction applied to the request.
+	System string `json:"system,omitempty"`
+	// Messages is the non-empty user/assistant transcript.
+	Messages []Message `json:"messages"`
+	// MaxTokens is required and enforced by API flavors. CLI flavors validate
+	// it for request portability but cannot reliably enforce it.
+	MaxTokens int `json:"max_tokens"`
 }
 
 // Usage reports token counts made available by a target.
 type Usage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CachedInputTokens        int `json:"cached_input_tokens,omitempty"`
+	// InputTokens is the total input token count reported by the target.
+	InputTokens int `json:"input_tokens"`
+	// OutputTokens is the total output token count reported by the target.
+	OutputTokens int `json:"output_tokens"`
+	// CachedInputTokens is the reused prompt-cache token count, when reported.
+	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
+	// CacheCreationInputTokens is the newly cached input count, when reported.
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	ReasoningTokens          int `json:"reasoning_tokens,omitempty"`
+	// ReasoningTokens is the reasoning output count, when reported.
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 }
 
 // Response is a provider-neutral text generation result.
 type Response struct {
-	ID       string   `json:"id,omitempty"`
-	Model    string   `json:"model"`
-	Text     string   `json:"text"`
-	Usage    Usage    `json:"usage"`
+	// ID is the provider response or CLI session/thread identifier, when reported.
+	ID string `json:"id,omitempty"`
+	// Model is the configured or provider-reported model name.
+	Model string `json:"model"`
+	// Text is the normalized response text.
+	Text string `json:"text"`
+	// Usage contains the token counts reported by the selected target.
+	Usage Usage `json:"usage"`
+	// Provider identifies the selected provider.
 	Provider Provider `json:"provider"`
-	Flavor   Flavor   `json:"flavor"`
+	// Flavor identifies the selected transport flavor.
+	Flavor Flavor `json:"flavor"`
 }
 
 // User builds a user-role text message.

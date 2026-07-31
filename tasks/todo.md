@@ -282,19 +282,19 @@ limitations.
 
 **Acceptance criteria:**
 
-- [ ] README includes installation, target matrix, API/CLI quick starts, example
+- [x] README includes installation, target matrix, API/CLI quick starts, example
       command, authentication, and limitations without claiming exact CLI/API
       parity.
-- [ ] `doc.go` demonstrates the approved API and every exported declaration has
+- [x] `doc.go` demonstrates the approved API and every exported declaration has
       a concise Go doc comment.
-- [ ] Documentation consistently uses `llmwrapper` and the new module path.
+- [x] Documentation consistently uses `llmwrapper` and the new module path.
 
 **Verification:**
 
-- [ ] `go test ./...`
-- [ ] `go vet ./...`
-- [ ] `go doc .`
-- [ ] `git diff --check`
+- [x] `go test ./...`
+- [x] `go vet ./...`
+- [x] `go doc .`
+- [x] `git diff --check`
 
 **Dependencies:** Task 7.
 
@@ -308,11 +308,11 @@ limitations.
 
 ## Checkpoint: Feature complete
 
-- [ ] Contract, adapter, and example tests pass together.
-- [ ] `go build ./...`
-- [ ] `go test -race ./...`
-- [ ] `go test -cover ./...`
-- [ ] README/spec/API agree on the exact four targets and scope.
+- [x] Contract, adapter, and example tests pass together.
+- [x] `go build ./...`
+- [x] `go test -race ./...`
+- [x] `go test -cover ./...`
+- [x] README/spec/API agree on the exact four targets and scope.
 
 ## Task 9: Run the completion and cleanliness audit
 

@@ -1,3 +1,29 @@
 // Package llmwrapper provides one text-generation API backed by switchable
 // Claude and OpenAI API or CLI targets.
+//
+// Construct a client with an explicit provider, flavor, and model, then send a
+// provider-neutral request:
+//
+//	client, err := llmwrapper.New(llmwrapper.Config{
+//		Provider: llmwrapper.ProviderOpenAI,
+//		Flavor:   llmwrapper.FlavorCLI,
+//		Model:    "gpt-5.6-sol",
+//	})
+//	if err != nil {
+//		return err
+//	}
+//
+//	response, err := client.Generate(ctx, llmwrapper.Request{
+//		System:    "Answer concisely.",
+//		Messages:  []llmwrapper.Message{llmwrapper.User("Hello")},
+//		MaxTokens: 1024,
+//	})
+//	if err != nil {
+//		return err
+//	}
+//	fmt.Println(response.Text)
+//
+// Changing Config is sufficient to select Claude API, Claude CLI, OpenAI API,
+// or Codex CLI. CLI targets use local authentication and may not support every
+// hosted-API control, including an exact maximum output-token limit.
 package llmwrapper

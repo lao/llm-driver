@@ -17,13 +17,20 @@ var (
 
 // Error adds target and operation context to configuration and runtime failures.
 type Error struct {
-	Provider  Provider
-	Flavor    Flavor
+	// Provider identifies the failing provider, when known.
+	Provider Provider
+	// Flavor identifies the failing transport flavor, when known.
+	Flavor Flavor
+	// Operation identifies the library operation that failed.
 	Operation string
-	Status    int
-	Code      string
-	Message   string
-	Err       error
+	// Status is an HTTP status or process exit code, when available.
+	Status int
+	// Code is the provider or CLI failure code, when available.
+	Code string
+	// Message is a concise upstream or normalized failure message.
+	Message string
+	// Err preserves the underlying cause for errors.Is and errors.As.
+	Err error
 }
 
 // Error returns a concise target-aware description.

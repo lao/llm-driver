@@ -29,15 +29,23 @@ const (
 
 // Config selects a provider, transport flavor, and model for a Client.
 type Config struct {
+	// Provider selects Claude or OpenAI.
 	Provider Provider
-	Flavor   Flavor
-	Model    string
+	// Flavor selects the hosted API or locally authenticated CLI.
+	Flavor Flavor
+	// Model is the explicit provider model name.
+	Model string
 
-	APIKey     string
-	BaseURL    string
+	// APIKey overrides the API flavor's environment-based credential.
+	APIKey string
+	// BaseURL optionally overrides the API endpoint for a proxy or test server.
+	BaseURL string
+	// HTTPClient optionally overrides the API flavor's HTTP client.
 	HTTPClient *http.Client
 
+	// CLIPath optionally overrides the default claude or codex executable.
 	CLIPath string
+	// CLIArgs appends direct arguments to the selected CLI command.
 	CLIArgs []string
 
 	runner commandRunner
