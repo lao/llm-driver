@@ -1,164 +1,364 @@
-# claudewrap — Implementation Plan
+# Implementation Plan: llmwrapper multi-provider API
 
-Derived from `SPEC.md`. Greenfield; single Go package (root) + `internal` helpers.
-Work is sliced **vertically** — each task delivers one complete caller→backend→neutral-type
-path, testable on its own. No horizontal "write all types, then all backends" layering.
+**Status:** approved on 2026-07-31
 
----
+**Source of truth:** [`SPEC.md`](../SPEC.md)
 
-## Dependency graph
+## Overview
 
-```
-types.go ─┬─────────────────────────────────────────────┐
-          │                                              │
-errors.go ┤                                              │
-          ▼                                              ▼
-      backend.go (iface) ──┬── backend_sdk.go        stream.go
-          │                └── backend_cli.go            │
-          ▼                        │                     │
-   options.go / claude.go (New, backend select)          │
-          ▼                        │                     │
-      messages.go (MessagesService: New, NewStreaming) ──┘
-          │
-          ├── backend_sdk_test.go (httptest)
-          ├── backend_cli_test.go (fake commandRunner)
-          ├── contract_test.go (both backends, parity)
-          └── examples/, README, Makefile, doc.go
-```
+Replace the current Claude-specific constructor and Anthropic-shaped public API
+with a small `llmwrapper.Config` + `Client.Generate` contract. Four internal
+adapters implement the same request/response boundary: Anthropic API, Claude
+CLI, OpenAI Responses API, and Codex CLI. The work proceeds as vertical slices,
+proving one target end-to-end at a time while keeping SDK and process details
+private.
 
-Hard edges:
-- Everything depends on `types.go` + `errors.go`.
-- `claude.go`/`options.go` depend on `backend.go` (iface) — but **not** on the
-  concrete backends’ internals (constructed via unexported factories in the same package → no cycle).
-- `anthropic-sdk-go` imported **only** in `backend_sdk.go`.
-- Streaming (`stream.go`) is independent of non-streaming and lands after the
-  non-streaming path is proven.
+The implementation is a clean break. It does not retain deprecated constructors,
+Messages-service aliases, content-block types, or the old module/package name.
 
----
+## Baseline and Migration Constraints
 
-## Phases, checkpoints & vertical slices
+- The branch starts from a working two-target prototype: Anthropic SDK and
+  Claude CLI, both non-streaming.
+- The existing public API is intentionally replaced, not wrapped.
+- Renaming every root Go package declaration is one unavoidable atomic,
+  mechanical change. It spans more files than a normal task but contains no
+  behavioral redesign and receives its own review checkpoint.
+- Default tests stay offline: API tests use `httptest.Server`; CLI tests use an
+  injected process runner.
+- The GitHub remote remains `github.com/lao/claudewrap` until the separate
+  repository setting is renamed. The committed Go module path is
+  `github.com/lao/llmwrapper` as approved.
 
-### Phase A — SDK non-streaming path (first end-to-end value)
+## Architecture
 
-**T1. Foundation types + errors**
-- Files: `types.go`, `errors.go`, `doc.go`.
-- Neutral types per SPEC §3: `Role`, `BlockType`, `StopReason`, `EventType`,
-  `Message`, `ContentBlock`, `MessageParams`, `Response`, `Usage`, `Tool`.
-- Helpers: `UserMessage`, `AssistantMessage`, `TextBlock`, `(*Response).Text()`.
-- `Error` type (`Backend`, `Op`, `Status`, `Type`, `Message`, `Err`), `Error()`,
-  `Unwrap()`; sentinels `ErrNoBackend`, `ErrCLINotFound`.
-- **Acceptance:** types compile; helpers + `Text()` covered by `types_test.go`.
-- **Verify:** `go build ./...`; `go test -run Types ./...`; `go vet ./...`.
-
-**T2. Backend interface + Client/options + SDK backend (messages only)**
-- Files: `backend.go`, `options.go`, `claude.go`, `backend_sdk.go`, `messages.go`.
-- `backend` iface: `messages`, `streamMessages` (stub returns "not implemented"
-  for now), `name`.
-- `New(...Option)`: validate exactly one backend option set → else `ErrNoBackend`.
-- `WithSDK(key, ...SDKOption)`, `WithSDKBaseURL`, `WithSDKHTTPClient`,
-  `WithDefaultModel`.
-- `sdkBackend.messages`: map `MessageParams` → `anthropic.MessageNewParams`,
-  call `client.Messages.New`, map `anthropic.Message` → neutral `Response`
-  (content text blocks, `Usage`, `StopReason`, `Backend:"sdk"`). Model defaults
-  to `claude-opus-4-8`. Wrap errors in `*Error`.
-- `MessagesService.New` delegates to backend.
-- Add `anthropic-sdk-go` require to `go.mod` (pinned).
-- **Acceptance:** `c,_ := New(WithSDK("k", WithSDKBaseURL(ts.URL)))` then
-  `Messages.New` returns a correct neutral `Response` from a canned httptest body;
-  error status → `*Error` with `Status` + `Backend:"sdk"`.
-- **Verify:** `go test -run SDK ./...` (httptest, no network); `go vet ./...`; `gofmt -l .` empty.
-
-> **CHECKPOINT 1 — SDK flavor works end-to-end.** One real transport proven
-> against a fake server, neutral types only. Human review of the public API shape
-> before the second backend locks it in.
-
----
-
-### Phase B — CLI non-streaming path + parity
-
-**T3. CLI backend (messages only)**
-- File: `backend_cli.go`.
-- `WithCLI(...CLIOption)`, `WithCLIPath`, `WithCLIExtraArgs`.
-- Injectable `commandRunner func(ctx, name string, args []string, stdin []byte) (stdout, stderr []byte, exit int, err error)`; default = real `exec.CommandContext`.
-- `cliBackend.messages`: build args (`-p`, `--output-format json`,
-  `--model`, `--append-system-prompt`), flatten transcript → prompt via **stdin**
-  (no shell string), parse CLI JSON → neutral `Response` (`Backend:"cli"`).
-- Missing binary → `ErrCLINotFound`; non-zero exit / bad JSON → `*Error` with
-  `Status`=exit code, `Backend:"cli"`.
-- **Acceptance:** fake runner returning canned CLI JSON → correct neutral
-  `Response`; exit=1 → `*Error`; missing binary → `ErrCLINotFound`.
-- **Verify:** `go test -run CLI ./...` (fake runner, no process); `go vet`; `gofmt -l .`.
-
-**T4. Cross-backend contract test (non-streaming)**
-- File: `contract_test.go`.
-- One assertion set run against both backends (each with its fake) proving
-  identical neutral output for an equivalent prompt (content text, role, usage mapping).
-- **Acceptance:** same input → equivalent neutral `Response` from both (allowing
-  `Backend` field + documented CLI-dropped params to differ).
-- **Verify:** `go test -run Contract ./...`.
-
-> **CHECKPOINT 2 — Both flavors reach parity on non-streaming.** Confirms the
-> neutral-type boundary holds across two very different transports.
-
----
-
-### Phase C — Streaming, both backends
-
-**T5. Stream abstraction + SDK streaming**
-- Files: `stream.go`, extend `backend_sdk.go`, `messages.go`.
-- `Stream` (`Next`, `Event`, `Err`, `Response`, `Close`), `StreamEvent`.
-- `sdkBackend.streamMessages`: drive `anthropic-sdk-go` streaming, accumulate to
-  final `Response`, emit `text_delta` events.
-- `MessagesService.NewStreaming` delegates.
-- **Acceptance:** httptest SSE body → ordered `text_delta` events + accumulated
-  `Response.Text()` equal to full text.
-- **Verify:** `go test -run StreamSDK ./...`.
-
-**T6. CLI streaming + streaming contract**
-- Files: extend `backend_cli.go`, extend `contract_test.go`.
-- `cliBackend.streamMessages`: `--output-format stream-json --verbose`, parse
-  JSONL lines from fake runner’s piped stdout → `text_delta` events + final `Response`.
-- Streaming contract test across both backends.
-- **Acceptance:** fake stream-json lines → same event/text sequence shape as SDK;
-  streaming contract passes.
-- **Verify:** `go test -run 'StreamCLI|StreamContract' ./...`; then full `go test ./...`.
-
-> **CHECKPOINT 3 — Streaming parity.** Full unit suite green on both flavors,
-> non-streaming + streaming.
-
----
-
-### Phase D — Ship polish
-
-**T7. Examples, docs, tooling, integration tests**
-- Files: `examples/sdk/main.go`, `examples/cli/main.go`, `README.md`,
-  `Makefile`, integration tests behind `//go:build integration`.
-- README: install, both-flavor quickstart, CLI limitations (SPEC §7), backend
-  selection table.
-- Integration: SDK needs `ANTHROPIC_API_KEY` (one `claude-haiku-4-5` call); CLI
-  skips with a clear message if `claude` absent.
-- **Acceptance:** examples compile (`go build ./examples/...`); `make test lint`
-  green; `gofmt -l .` empty; every exported symbol has godoc.
-- **Verify:** `go build ./...`; `go test ./...`; `go vet ./...`; `gofmt -l .`;
-  `golangci-lint run` (if installed); `go test -tags integration ./...` (opt-in, may skip).
-
-> **CHECKPOINT 4 — Ship-ready v0.1.** Full green, examples build, docs complete.
-
----
-
-## Global verification (run after every task)
-```
-go build ./...  &&  go vet ./...  &&  gofmt -l .  &&  go test ./...
-```
-`gofmt -l .` must print nothing. Default `go test` never hits network or spawns `claude`.
-
-## Risks & mitigations
-- **CLI JSON schema drift** — pin behavior to fields actually emitted by the
-  installed `claude`; verify flags/shape against the real binary before T3 lands;
-  keep mapping in one function.
-- **anthropic-sdk-go API differences** — write `backend_sdk.go` first, let the
-  compiler drive exact type/field names (per skill guidance); do not guess.
-- **Import cycle** — avoided by keeping both backends in the root package.
-- **Prompt injection into shell** — args/stdin only; never a shell string (enforced in T3, checked in review).
+```text
+caller
+  |
+  v
+Client.Generate(ctx, Request)
+  |-- validate Config at construction
+  |-- validate Request before adapter invocation
+  |
+  v
+backend.generate(ctx, Request)  (unexported interface)
+  |
+  +-- claude/api  ---> anthropicBackend ---> Anthropic Messages API
+  +-- claude/cli  ---> claudeCLIBackend --> `claude -p` JSON
+  +-- openai/api  ---> openAIBackend -----> OpenAI Responses API
+  `-- openai/cli  ---> codexCLIBackend ----> `codex exec --json` JSONL
 ```
 
+### Public boundary
+
+- `Config` selects a required `Provider`, `Flavor`, and `Model`.
+- `Client.Generate` accepts `Request{System, Messages, MaxTokens}`.
+- `Response` exposes only neutral text, identity, provider/flavor, and `Usage`.
+- `Error` records provider, flavor, operation, HTTP status/process exit code,
+  provider code, message, and wrapped cause.
+- `ErrInvalidConfig`, `ErrInvalidRequest`, and `ErrExecutableNotFound` allow
+  stable `errors.Is` checks without multiplying target-specific sentinels.
+
+### Dependency direction
+
+```text
+neutral types + validation + errors
+             |
+             v
+      Client + backend interface
+       /        |         |       \
+Anthropic API OpenAI API Claude CLI Codex CLI
+       \        |         |       /
+             contract tests
+                   |
+             example + docs
+```
+
+Provider SDK imports occur only in their adapter files. CLI implementations
+depend on a shared unexported command runner and prompt renderer. Public code
+never imports a provider SDK or exposes subprocess types.
+
+### Target mapping
+
+| Target | Request mapping | Result mapping |
+| --- | --- | --- |
+| Claude/API | Messages API system block, structured turns, `max_tokens`, configured model | Text blocks joined; message ID/model; input/output/cache usage |
+| OpenAI/API | Responses API instructions, structured input turns, `max_output_tokens`, configured model | `OutputText`; response ID/model; input/output/cached/reasoning usage |
+| Claude/CLI | Prompt transcript on stdin; `-p --output-format json --model`; system via CLI flag; no session persistence | JSON result/session ID/usage; non-success subtype becomes normalized error |
+| OpenAI/CLI | Prompt including system/transcript on stdin; `codex exec --json --ephemeral --sandbox read-only --model ... -` | Final completed agent-message item; turn-completed usage; failed/error events become normalized errors |
+
+CLI `MaxTokens` has no reliable equivalent and is accepted but not translated.
+This limitation is documented, not silently presented as exact parity.
+
+## Dependency-Ordered Increments
+
+### Increment 1 — Package identity and neutral contract
+
+Atomically rename the module/package, remove the old public surface, and install
+the approved neutral types, validation, errors, client, and backend selection.
+Use a tiny fake backend to prove validation occurs before delegation and that
+response provider/flavor metadata is normalized centrally.
+
+Dependencies: none.
+
+Acceptance checkpoint:
+
+- The module/package compile only as `llmwrapper`.
+- All four provider/flavor pairs resolve to an internal target; invalid enums,
+  blank models, and invalid requests fail before adapter work.
+- `errors.Is`/`errors.As` work for validation and wrapped operational errors.
+- No compatibility API remains.
+
+Verification:
+
+```bash
+go test ./... -run 'Test(Config|Request|Client|Error)'
+go test ./...
+go vet ./...
+```
+
+### Increment 2 — Claude API vertical slice
+
+Adapt the existing Anthropic implementation to the new contract. Map system
+instructions, multi-turn text, model, and max tokens into Messages; normalize
+text, IDs, model, all supported usage fields, and SDK errors.
+
+Dependencies: Increment 1.
+
+Acceptance checkpoint:
+
+- A neutral `Generate` call reaches an `httptest.Server` through the official
+  Anthropic SDK and returns the approved neutral response.
+- Request body and error mapping tests cover happy and non-2xx paths.
+- No Anthropic type appears in an exported declaration.
+
+Verification:
+
+```bash
+go test ./... -run 'TestAnthropic'
+go test ./...
+go vet ./...
+```
+
+### Increment 3 — OpenAI API vertical slice
+
+Add the official OpenAI Go SDK and implement the Responses API adapter. Map the
+same neutral system/transcript/model/token request and normalize output text,
+IDs, usage (including cached and reasoning tokens), and SDK errors.
+
+Dependencies: Increment 1. It may be implemented after Increment 2 without
+coupling to the Anthropic adapter.
+
+Acceptance checkpoint:
+
+- A neutral `Generate` call reaches an `httptest.Server` through OpenAI
+  Responses and returns the same neutral response shape.
+- Tests assert the request uses Responses rather than Chat Completions.
+- OpenAI SDK unions and errors are confined to the adapter.
+
+Verification:
+
+```bash
+go test ./... -run 'TestOpenAI'
+go test ./...
+go vet ./...
+```
+
+### Checkpoint A — Both API flavors
+
+- Both API slices pass independently and together.
+- Request/response/error mappings receive a focused diff review.
+- `go test -race ./...` is green before process adapters are added.
+
+### Increment 4 — Shared process boundary and Claude CLI slice
+
+Extract a shared safe runner and transcript renderer, then migrate the current
+Claude CLI implementation. Prompts remain stdin bytes; configuration contributes
+argv only; no shell string is ever constructed.
+
+Dependencies: Increment 1.
+
+Acceptance checkpoint:
+
+- Exact executable, argv, and stdin are tested for single-turn, system, and
+  multi-turn requests.
+- Success JSON, provider-reported error JSON, malformed JSON, missing binary,
+  launch failure, and non-zero exit are normalized.
+- The default runner is the only code that touches `os/exec`.
+
+Verification:
+
+```bash
+go test ./... -run 'Test(ClaudeCLI|Prompt|Command)'
+go test ./...
+go vet ./...
+```
+
+### Increment 5 — Codex CLI vertical slice
+
+Implement non-interactive Codex execution using JSONL output. Parse completed
+agent-message items as response text and turn completion as usage. Treat failed
+turns, error events, missing final messages, malformed JSONL, process failures,
+and missing executables as contextual errors.
+
+Dependencies: Increment 4 for the runner/renderer; Increment 1 for target
+selection.
+
+Acceptance checkpoint:
+
+- Exact `codex exec` argv and stdin are covered by fake-runner tests.
+- Multiple progress/reasoning events do not leak into final response text.
+- Cached input and reasoning output usage map to neutral fields.
+- Parsing has no dependency on a locally installed Codex binary.
+
+Verification:
+
+```bash
+go test ./... -run 'TestCodexCLI'
+go test ./...
+go vet ./...
+```
+
+### Checkpoint B — Both CLI flavors
+
+- Claude and Codex fake-process suites cover success and all material error
+  paths.
+- No test invokes a real executable.
+- Shell-injection safety is evident from the runner signature and argv/stdin
+  assertions.
+- `go test -race ./...` is green.
+
+### Increment 6 — Four-target contract suite
+
+Build one table-driven suite over all four target factories. Give every fake
+transport an equivalent upstream result and assert identical normalized text,
+model, usage, provider/flavor metadata, validation behavior, and error context.
+
+Dependencies: Increments 2–5.
+
+Acceptance checkpoint:
+
+- Every target passes the same request/response assertions.
+- Only documented transport differences are excluded, with comments explaining
+  why.
+- Construction tests prove all and only the four approved pairs.
+
+Verification:
+
+```bash
+go test ./... -run 'TestContract'
+go test -race ./...
+go test -cover ./...
+```
+
+### Increment 7 — Switchable example and documentation
+
+Add `examples/switchable`, package docs, and a concise README. The example parses
+`--provider`, `--flavor`, `--model`, `--prompt`, and `--max-tokens`, constructs
+one `Config`, and makes one unchanged `Generate` call. Document API-key
+environment variables, local CLI auth, the target matrix, and CLI semantic
+limitations.
+
+Dependencies: Increment 6.
+
+Acceptance checkpoint:
+
+- The example builds and `--help` explains all required flags.
+- README quick starts cover at least one API and one CLI configuration while
+  sharing the same request code.
+- Every exported declaration has Go documentation.
+
+Verification:
+
+```bash
+go build ./examples/switchable
+go run ./examples/switchable --help
+go test ./...
+go vet ./...
+```
+
+### Increment 8 — Cleanup, final audit, and PR
+
+Remove obsolete files/types/tests, tidy dependencies, format, and audit every
+success criterion against current evidence. Review the complete diff, commit
+cohesive changes, push `codex/llmwrapper`, and open a PR against `main` that
+references the spec and reports verification results.
+
+Dependencies: Increments 1–7.
+
+Acceptance checkpoint:
+
+- No active code or documentation uses the old package/module identifier or
+  removed API names.
+- All required commands pass from a clean working tree without credentials.
+- The remote branch and GitHub PR exist and match the verified commit.
+
+Verification:
+
+```bash
+test -z "$(gofmt -l .)"
+go mod tidy
+git diff --exit-code -- go.mod go.sum
+go build ./...
+go test ./...
+go test -race ./...
+go test -cover ./...
+go vet ./...
+go build ./examples/switchable
+rg -n 'package claudewrap|github.com/lao/claudewrap' --glob '*.go' --glob 'go.mod' --glob '*.md'
+git diff --check origin/main...HEAD
+```
+
+The stale-identifier `rg` command must produce no matches.
+
+## Sequencing and Parallelization
+
+- Increment 1 is strictly first because every adapter depends on the neutral
+  contract.
+- API adapters (2 and 3) are logically independent after Increment 1.
+- CLI work begins with the shared runner in Increment 4; Codex then reuses it in
+  Increment 5.
+- Contract tests, docs/example, and final cleanup remain sequential because they
+  integrate every preceding slice.
+- Work will be executed sequentially in this session. The logical independence
+  above is documented for review and future maintenance, not used to introduce
+  coordination overhead.
+
+## Risks and Mitigations
+
+| Risk | Impact | Mitigation |
+| --- | --- | --- |
+| Public rename/API replacement creates a wide diff | High | Separate mechanical identity changes from adapter behavior in commits and review the stale-identifier search |
+| OpenAI SDK Responses unions are easy to map incorrectly | High | Pin v3.48.0, inspect actual types with `go doc`, and assert captured wire JSON through `httptest` |
+| SDK base-URL semantics differ | Medium | Give each adapter its own test-server setup and assert request path/method |
+| CLI output schemas drift between installed versions | High | Parse only documented fields/events, ignore unknown JSON fields, and cover malformed/missing terminal events |
+| CLI tools are agentic, unlike hosted text endpoints | Medium | Use non-interactive/ephemeral modes, read-only Codex sandbox, stdin prompts, and explicit README limitations |
+| Usage fields do not align one-to-one | Medium | Keep a small superset of neutral counters and leave unavailable counters zero |
+| CLI max tokens cannot be enforced consistently | Low | Accept the shared request, document the limitation, and never claim exact transport parity |
+| New module path is not fetchable until repository rename | Medium | Call it out in README/PR and avoid changing the remote repository setting without separate approval |
+
+## Verification Checkpoints
+
+At every increment:
+
+```bash
+gofmt -w .
+go test ./...
+go vet ./...
+git diff --check
+```
+
+At Checkpoints A and B, and before the PR:
+
+```bash
+go build ./...
+go test -race ./...
+go test -cover ./...
+```
+
+No implementation increment is complete when a required command fails.
+
+## Open Questions
+
+None. Implementation begins only after this plan is approved and the detailed
+task checklist is generated and approved.
