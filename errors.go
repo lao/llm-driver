@@ -7,6 +7,8 @@ import (
 
 // Sentinel errors returned for configuration and environment problems.
 var (
+	// ErrInvalidConfig identifies invalid llmwrapper client configuration.
+	ErrInvalidConfig = errors.New("llmwrapper: invalid config")
 	// ErrNoBackend is returned by New when no backend option (WithSDK/WithCLI) is given.
 	ErrNoBackend = errors.New("claudewrap: no backend configured")
 	// ErrCLINotFound is returned by the cli backend when the claude binary is not on PATH.
