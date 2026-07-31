@@ -22,7 +22,7 @@ func (b *pendingBackend) generate(context.Context, Request) (*Response, error) {
 func buildBackend(config Config) (backend, error) {
 	switch {
 	case config.Provider == ProviderClaude && config.Flavor == FlavorAPI:
-		return &pendingBackend{config: config}, nil
+		return newAnthropicBackend(config), nil
 	case config.Provider == ProviderClaude && config.Flavor == FlavorCLI:
 		return &pendingBackend{config: config}, nil
 	case config.Provider == ProviderOpenAI && config.Flavor == FlavorAPI:

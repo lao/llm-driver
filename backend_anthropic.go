@@ -1,0 +1,89 @@
+package llmwrapper
+
+import (
+	"context"
+	"errors"
+	"strings"
+
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
+)
+
+type anthropicBackend struct {
+	client anthropic.Client
+	model  string
+}
+
+func newAnthropicBackend(config Config) *anthropicBackend {
+	options := []option.RequestOption{}
+	if config.APIKey != "" {
+		options = append(options, option.WithAPIKey(config.APIKey))
+	}
+	if config.BaseURL != "" {
+		options = append(options, option.WithBaseURL(config.BaseURL))
+	}
+	if config.HTTPClient != nil {
+		options = append(options, option.WithHTTPClient(config.HTTPClient))
+	}
+	return &anthropicBackend{
+		client: anthropic.NewClient(options...),
+		model:  config.Model,
+	}
+}
+
+func (b *anthropicBackend) generate(ctx context.Context, request Request) (*Response, error) {
+	params := anthropic.MessageNewParams{
+		Model:     anthropic.Model(b.model),
+		MaxTokens: int64(request.MaxTokens),
+		Messages:  make([]anthropic.MessageParam, 0, len(request.Messages)),
+	}
+	if request.System != "" {
+		params.System = []anthropic.TextBlockParam{{Text: request.System}}
+	}
+	for _, message := range request.Messages {
+		block := anthropic.NewTextBlock(message.Text)
+		if message.Role == RoleAssistant {
+			params.Messages = append(params.Messages, anthropic.NewAssistantMessage(block))
+		} else {
+			params.Messages = append(params.Messages, anthropic.NewUserMessage(block))
+		}
+	}
+
+	message, err := b.client.Messages.New(ctx, params)
+	if err != nil {
+		return nil, normalizeAnthropicError(err)
+	}
+
+	var text strings.Builder
+	for _, block := range message.Content {
+		if block.Type == "text" {
+			text.WriteString(block.Text)
+		}
+	}
+	return &Response{
+		ID:    message.ID,
+		Model: string(message.Model),
+		Text:  text.String(),
+		Usage: Usage{
+			InputTokens:              int(message.Usage.InputTokens),
+			OutputTokens:             int(message.Usage.OutputTokens),
+			CachedInputTokens:        int(message.Usage.CacheReadInputTokens),
+			CacheCreationInputTokens: int(message.Usage.CacheCreationInputTokens),
+		},
+	}, nil
+}
+
+func normalizeAnthropicError(err error) error {
+	normalized := &Error{
+		Provider:  ProviderClaude,
+		Flavor:    FlavorAPI,
+		Operation: "generate",
+		Err:       err,
+	}
+	var apiError *anthropic.Error
+	if errors.As(err, &apiError) {
+		normalized.Status = apiError.StatusCode
+		normalized.Code = string(apiError.Type())
+	}
+	return normalized
+}

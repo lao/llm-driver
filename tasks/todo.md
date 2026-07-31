@@ -70,19 +70,19 @@ text, response identity, usage, and API errors.
 
 **Acceptance criteria:**
 
-- [ ] Captured HTTP requests contain the expected Messages path/body and
+- [x] Captured HTTP requests contain the expected Messages path/body and
       multi-turn roles without exposing Anthropic types publicly.
-- [ ] Successful text/cache usage maps to the neutral response with
+- [x] Successful text/cache usage maps to the neutral response with
       `ProviderClaude`/`FlavorAPI`.
-- [ ] Non-2xx and transport failures become contextual `*Error` values with
+- [x] Non-2xx and transport failures become contextual `*Error` values with
       status/code/cause preserved.
 
 **Verification:**
 
-- [ ] `go test ./... -run 'TestAnthropic'`
-- [ ] `go test ./...`
-- [ ] `go vet ./...`
-- [ ] `git diff --check`
+- [x] `go test ./... -run 'TestAnthropic'`
+- [x] `go test ./...`
+- [x] `go vet ./...`
+- [x] `git diff --check`
 
 **Dependencies:** Task 1.
 
