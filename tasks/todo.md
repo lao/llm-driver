@@ -362,17 +362,17 @@ results plus the repository-rename caveat.
 
 **Acceptance criteria:**
 
-- [ ] Working tree is clean and branch commits contain only in-scope changes.
-- [ ] `origin/codex/llmwrapper` points at the fully verified local commit.
-- [ ] A GitHub PR against `main` exists with summary, testing evidence, spec
+- [x] Working tree is clean and branch commits contain only in-scope changes.
+- [x] `origin/codex/llmwrapper` points at the fully verified local commit.
+- [x] A GitHub PR against `main` exists with summary, testing evidence, spec
       reference, and repository rename follow-up.
 
 **Verification:**
 
-- [ ] `git status --short --branch`
-- [ ] `git diff --check origin/main...HEAD`
-- [ ] `git log --oneline origin/main..HEAD`
-- [ ] `gh pr view --json number,url,title,baseRefName,headRefName,state`
+- [x] `git status --short --branch`
+- [x] `git diff --check origin/main...HEAD`
+- [x] `git log --oneline origin/main..HEAD`
+- [x] `gh pr view --json number,url,title,baseRefName,headRefName,state`
 
 **Dependencies:** Task 9.
 
@@ -382,6 +382,6 @@ results plus the repository-rename caveat.
 
 ## Final checkpoint
 
-- [ ] All ten tasks and all checkpoints are complete.
-- [ ] The complete verification suite is green at the pushed commit.
-- [ ] The pull request URL is recorded in the final handoff.
+- [x] All ten tasks and all checkpoints are complete.
+- [x] The complete verification suite is green at the pushed commit.
+- [x] The pull request URL is recorded in the final handoff.
