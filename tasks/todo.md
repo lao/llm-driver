@@ -322,25 +322,25 @@ and record completed checklist items only after their commands pass.
 
 **Acceptance criteria:**
 
-- [ ] No active package/module identifier or removed API survives, and dependency
+- [x] No active package/module identifier or removed API survives, and dependency
       metadata is tidy.
-- [ ] Build, unit, race, coverage, vet, example, formatting, and diff checks all
+- [x] Build, unit, race, coverage, vet, example, formatting, and diff checks all
       pass without credentials or real CLIs.
-- [ ] A requirement-by-requirement audit finds evidence for every success
+- [x] A requirement-by-requirement audit finds evidence for every success
       criterion and no unexplained scope divergence.
 
 **Verification:**
 
-- [ ] `test -z "$(gofmt -l .)"`
-- [ ] `go mod tidy && git diff --exit-code -- go.mod go.sum`
-- [ ] `go build ./...`
-- [ ] `go test ./...`
-- [ ] `go test -race ./...`
-- [ ] `go test -cover ./...`
-- [ ] `go vet ./...`
-- [ ] `go build ./examples/switchable`
-- [ ] `rg -n 'package claudewrap|github.com/lao/claudewrap' --glob '*.go' --glob 'go.mod' --glob '*.md'` produces no output
-- [ ] `git diff --check origin/main...HEAD`
+- [x] `test -z "$(gofmt -l .)"`
+- [x] `go mod tidy && git diff --exit-code -- go.mod go.sum`
+- [x] `go build ./...`
+- [x] `go test ./...`
+- [x] `go test -race ./...`
+- [x] `go test -cover ./...`
+- [x] `go vet ./...`
+- [x] `go build ./examples/switchable`
+- [x] `rg -n 'package claudewrap|github.com/lao/claudewrap' --glob '*.go' --glob 'go.mod' --glob '*.md' --glob '!tasks/**'` produces no output (planning docs retain the repository-rename caveat)
+- [x] `git diff --check origin/main...HEAD`
 
 **Dependencies:** Tasks 1–8.
 
