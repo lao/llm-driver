@@ -2,6 +2,7 @@ package llmwrapper
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -61,9 +62,10 @@ func (b *anthropicBackend) generate(ctx context.Context, request Request) (*Resp
 		}
 	}
 	return &Response{
-		ID:    message.ID,
-		Model: string(message.Model),
-		Text:  text.String(),
+		ID:               message.ID,
+		Model:            string(message.Model),
+		Text:             text.String(),
+		CompletionReason: normalizeAnthropicCompletionReason(message.StopReason),
 		Usage: Usage{
 			InputTokens:              int(message.Usage.InputTokens),
 			OutputTokens:             int(message.Usage.OutputTokens),
@@ -84,6 +86,27 @@ func normalizeAnthropicError(err error) error {
 	if errors.As(err, &apiError) {
 		normalized.Status = apiError.StatusCode
 		normalized.Code = string(apiError.Type())
+		var payload struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal([]byte(apiError.RawJSON()), &payload) == nil {
+			normalized.Message = payload.Error.Message
+		}
 	}
 	return normalized
+}
+
+func normalizeAnthropicCompletionReason(reason anthropic.StopReason) CompletionReason {
+	switch reason {
+	case anthropic.StopReasonEndTurn, anthropic.StopReasonStopSequence:
+		return CompletionReasonStop
+	case anthropic.StopReasonMaxTokens:
+		return CompletionReasonMaxTokens
+	case anthropic.StopReasonRefusal:
+		return CompletionReasonRefusal
+	default:
+		return ""
+	}
 }

@@ -81,13 +81,16 @@ func User(string) Message
 func Assistant(string) Message
 
 type Response struct {
-	ID       string
-	Model    string
-	Text     string
-	Usage    Usage
-	Provider Provider
-	Flavor   Flavor
+	ID               string
+	Model            string
+	Text             string
+	Usage            Usage
+	CompletionReason CompletionReason
+	Provider         Provider
+	Flavor           Flavor
 }
+
+type CompletionReason string // stop, max_tokens, or refusal when reported
 
 type Usage struct {
 	InputTokens              int
@@ -126,7 +129,7 @@ In scope:
 - A per-request maximum output-token request. API flavors enforce/map it; CLI
   flavors accept the common request but may not provide an equivalent flag.
 - Normalized response text, model, provider/flavor identity, optional response
-  ID, and available token usage.
+  ID and completion reason, and available token usage.
 - Consistent configuration, validation, executable-not-found, process, parsing,
   transport, and API errors.
 - Configurable API base URL/HTTP client and CLI path/extra argv for testing,

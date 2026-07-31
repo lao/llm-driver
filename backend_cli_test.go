@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -82,7 +84,7 @@ func TestCommandMissingExecutable(t *testing.T) {
 }
 
 func TestCommandPreservesDeadline(t *testing.T) {
-	t.Setenv("LLMWRAPPER_HELPER_PROCESS", "1")
+	t.Setenv("LLMWRAPPER_HELPER_PROCESS", "sleep")
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
@@ -97,10 +99,75 @@ func TestCommandPreservesDeadline(t *testing.T) {
 	}
 }
 
+func TestCommandCancellationDoesNotWaitForDescendant(t *testing.T) {
+	readyPath := filepath.Join(t.TempDir(), "ready")
+	t.Setenv("LLMWRAPPER_HELPER_PROCESS", "parent")
+	t.Setenv("LLMWRAPPER_HELPER_READY", readyPath)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, _, _, err := defaultCommandRunner(
+			ctx,
+			os.Args[0],
+			[]string{"-test.run=^TestCommandHelperProcess$"},
+			nil,
+		)
+		result <- err
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(readyPath); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("os.Stat(%q): %v", readyPath, err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("descendant process did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	var err error
+	select {
+	case err = <-result:
+	case <-time.After(time.Second):
+		select {
+		case err = <-result:
+			t.Error("defaultCommandRunner() waited for descendant stdio after cancellation")
+		case <-time.After(4 * time.Second):
+			t.Fatal("defaultCommandRunner() did not return after descendant exited")
+		}
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("defaultCommandRunner() error = %v, want context.Canceled", err)
+	}
+}
+
 func TestCommandHelperProcess(t *testing.T) {
-	if os.Getenv("LLMWRAPPER_HELPER_PROCESS") != "1" {
+	if os.Getenv("LLMWRAPPER_HELPER_DESCENDANT") == "1" {
+		time.Sleep(3 * time.Second)
 		return
 	}
+
+	switch os.Getenv("LLMWRAPPER_HELPER_PROCESS") {
+	case "":
+		return
+	case "parent":
+		child := exec.Command(os.Args[0], "-test.run=^TestCommandHelperProcess$")
+		child.Env = append(os.Environ(), "LLMWRAPPER_HELPER_DESCENDANT=1")
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
+		if err := child.Start(); err != nil {
+			t.Fatalf("start descendant: %v", err)
+		}
+		if err := os.WriteFile(os.Getenv("LLMWRAPPER_HELPER_READY"), nil, 0o600); err != nil {
+			t.Fatalf("write ready file: %v", err)
+		}
+	}
+
 	for {
 		time.Sleep(time.Hour)
 	}

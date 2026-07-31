@@ -7,9 +7,13 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
-const maxCLIOutputBytes = 16 << 20
+const (
+	maxCLIOutputBytes   = 16 << 20
+	cliCommandWaitDelay = 250 * time.Millisecond
+)
 
 var errCLIOutputTooLarge = errors.New("llmwrapper: CLI output exceeds limit")
 
@@ -48,6 +52,8 @@ func defaultCommandRunner(ctx context.Context, name string, args []string, stdin
 	}
 
 	command := exec.CommandContext(ctx, path, args...)
+	configureCommand(command)
+	command.WaitDelay = cliCommandWaitDelay
 	command.Stdin = bytes.NewReader(stdin)
 	stdout := newBoundedBuffer(maxCLIOutputBytes)
 	stderr := newBoundedBuffer(maxCLIOutputBytes)

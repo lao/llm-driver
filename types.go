@@ -48,6 +48,18 @@ type Usage struct {
 	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 }
 
+// CompletionReason describes why a generation ended, when reported.
+type CompletionReason string
+
+const (
+	// CompletionReasonStop indicates a normal model or stop-sequence ending.
+	CompletionReasonStop CompletionReason = "stop"
+	// CompletionReasonMaxTokens indicates that the output-token limit was reached.
+	CompletionReasonMaxTokens CompletionReason = "max_tokens"
+	// CompletionReasonRefusal indicates that the model returned a refusal.
+	CompletionReasonRefusal CompletionReason = "refusal"
+)
+
 // Response is a provider-neutral text generation result.
 type Response struct {
 	// ID is the provider response or CLI session/thread identifier, when reported.
@@ -58,6 +70,8 @@ type Response struct {
 	Text string `json:"text"`
 	// Usage contains the token counts reported by the selected target.
 	Usage Usage `json:"usage"`
+	// CompletionReason describes why generation ended, when reported.
+	CompletionReason CompletionReason `json:"completion_reason,omitempty"`
 	// Provider identifies the selected provider.
 	Provider Provider `json:"provider"`
 	// Flavor identifies the selected transport flavor.

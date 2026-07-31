@@ -13,8 +13,8 @@ updated.
 
 ## Task 1: Cut over package identity and public contract
 
-**Description:** Atomically rename the module/root package and replace the old
-Claude-specific API with the approved provider-neutral `Config`,
+**Description:** Atomically rename the root package while retaining the existing
+module path, and replace the old Claude-specific API with the approved provider-neutral `Config`,
 `Client.Generate`, request/response/usage types, validation, contextual errors,
 and backend interface. Install internal target factories so every valid
 provider/flavor pair constructs while adapters are filled in by later tasks.
@@ -26,8 +26,9 @@ legacy deletions must be kept separate from new behavioral logic in the diff.
 
 **Acceptance criteria:**
 
-- [x] `go.mod`, every root Go package declaration, exported API, sentinel, and
-      error prefix use `llmwrapper`; no compatibility API remains.
+- [x] `go.mod` retains `github.com/lao/claudewrap`; every root Go package
+      declaration, exported API, sentinel, and error prefix use `llmwrapper`;
+      no compatibility API remains.
 - [x] Exactly the four approved provider/flavor pairs and nonblank models are
       accepted; invalid config/request values fail before adapter invocation.
 - [x] A fake backend proves `Generate` delegates once and centrally stamps
@@ -287,7 +288,8 @@ limitations.
       parity.
 - [x] `doc.go` demonstrates the approved API and every exported declaration has
       a concise Go doc comment.
-- [x] Documentation consistently uses `llmwrapper` and the new module path.
+- [x] Documentation consistently distinguishes package `llmwrapper` from the
+      unchanged `github.com/lao/claudewrap` module path.
 
 **Verification:**
 
@@ -322,8 +324,8 @@ and record completed checklist items only after their commands pass.
 
 **Acceptance criteria:**
 
-- [x] No active package/module identifier or removed API survives, and dependency
-      metadata is tidy.
+- [x] No old package declaration, mistaken `github.com/lao/llmwrapper` module
+      path, or removed API survives, and dependency metadata is tidy.
 - [x] Build, unit, race, coverage, vet, example, formatting, and diff checks all
       pass without credentials or real CLIs.
 - [x] A requirement-by-requirement audit finds evidence for every success
@@ -339,7 +341,8 @@ and record completed checklist items only after their commands pass.
 - [x] `go test -cover ./...`
 - [x] `go vet ./...`
 - [x] `go build ./examples/switchable`
-- [x] `rg -n 'package claudewrap|github.com/lao/claudewrap' --glob '*.go' --glob 'go.mod' --glob '*.md' --glob '!tasks/**'` produces no output (planning docs retain the repository-rename caveat)
+- [x] `rg -n 'package claudewrap|github.com/lao/llmwrapper' --glob '*.go' --glob 'go.mod' --glob '*.md' --glob '!tasks/**'` produces no output
+- [x] `rg -n '^module github.com/lao/claudewrap$' go.mod` matches the committed module declaration
 - [x] `git diff --check origin/main...HEAD`
 
 **Dependencies:** Tasks 1–8.

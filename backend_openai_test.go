@@ -3,7 +3,9 @@ package llmwrapper
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -142,6 +144,9 @@ func TestOpenAIGenerateMapsRequestAndResponse(t *testing.T) {
 	if result.ID != "resp_123" || result.Model != "gpt-test" || result.Text != "Hello, world" {
 		t.Fatalf("response = %+v", result)
 	}
+	if result.CompletionReason != CompletionReasonStop {
+		t.Fatalf("completion reason = %q, want %q", result.CompletionReason, CompletionReasonStop)
+	}
 	if result.Provider != ProviderOpenAI || result.Flavor != FlavorAPI {
 		t.Fatalf("response target = %s/%s", result.Provider, result.Flavor)
 	}
@@ -151,67 +156,134 @@ func TestOpenAIGenerateMapsRequestAndResponse(t *testing.T) {
 	}
 }
 
-func TestOpenAIGenerateRejectsNonTextTerminalResults(t *testing.T) {
+func TestOpenAIGeneratePreservesMaxOutputTokensResult(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name     string
-		response string
-		wantCode string
-	}{
-		{
-			name: "failed",
-			response: `{
-  "id":"resp_failed","object":"response","status":"failed","model":"gpt-test","output":[],
-  "error":{"code":"server_error","message":"generation failed"}
-}`,
-			wantCode: "server_error",
-		},
-		{
-			name: "incomplete",
-			response: `{
-  "id":"resp_incomplete","object":"response","status":"incomplete","model":"gpt-test","output":[],
-  "incomplete_details":{"reason":"max_output_tokens"}
-}`,
-			wantCode: "max_output_tokens",
-		},
-		{
-			name: "refusal",
-			response: `{
-  "id":"resp_refusal","object":"response","status":"completed","model":"gpt-test",
-  "output":[{"id":"msg_refusal","type":"message","status":"completed","role":"assistant","content":[{"type":"refusal","refusal":"I cannot help with that."}]}]
-}`,
-			wantCode: "refusal",
-		},
+	const response = `{
+  "id":"resp_incomplete","object":"response","status":"incomplete","model":"gpt-test",
+  "output":[{
+    "id":"msg_incomplete","type":"message","status":"incomplete","role":"assistant",
+    "content":[{"type":"output_text","text":"partial answer","annotations":[],"logprobs":[]}]
+  }],
+  "incomplete_details":{"reason":"max_output_tokens"},
+  "usage":{
+    "input_tokens":10,
+    "input_tokens_details":{"cached_tokens":3},
+    "output_tokens":7,
+    "output_tokens_details":{"reasoning_tokens":2},
+    "total_tokens":17
+  }
+}`
+	client, err := New(Config{
+		Provider: ProviderOpenAI,
+		Flavor:   FlavorAPI,
+		Model:    "gpt-test",
+		APIKey:   "test-key",
+		BaseURL:  "https://example.test",
+		HTTPClient: &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(response)),
+				Request:    request,
+			}, nil
+		})},
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
+	result, err := client.Generate(context.Background(), Request{MaxTokens: 16, Messages: []Message{User("hello")}})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if result.Text != "partial answer" {
+		t.Fatalf("response text = %q, want %q", result.Text, "partial answer")
+	}
+	if result.CompletionReason != CompletionReasonMaxTokens {
+		t.Fatalf("completion reason = %q, want %q", result.CompletionReason, CompletionReasonMaxTokens)
+	}
+	wantUsage := Usage{InputTokens: 10, OutputTokens: 7, CachedInputTokens: 3, ReasoningTokens: 2}
+	if result.Usage != wantUsage {
+		t.Fatalf("usage = %+v, want %+v", result.Usage, wantUsage)
+	}
+}
 
-			server, _ := newAPITestServer(t, http.StatusOK, test.response)
-			client, err := New(Config{
-				Provider: ProviderOpenAI,
-				Flavor:   FlavorAPI,
-				Model:    "gpt-test",
-				APIKey:   "test-key",
-				BaseURL:  server.URL,
-			})
-			if err != nil {
-				t.Fatalf("New(): %v", err)
-			}
+func TestOpenAIGeneratePreservesRefusal(t *testing.T) {
+	t.Parallel()
 
-			_, err = client.Generate(context.Background(), Request{MaxTokens: 16, Messages: []Message{User("hello")}})
-			var target *Error
-			if !errors.As(err, &target) {
-				t.Fatalf("Generate() error = %T %v, want *Error", err, err)
-			}
-			if target.Provider != ProviderOpenAI || target.Flavor != FlavorAPI || target.Operation != "generate" {
-				t.Fatalf("error context = %+v", target)
-			}
-			if target.Code != test.wantCode {
-				t.Fatalf("error code = %q, want %q", target.Code, test.wantCode)
-			}
-		})
+	const response = `{
+  "id":"resp_refusal","object":"response","status":"completed","model":"gpt-test",
+  "output":[{
+    "id":"msg_refusal","type":"message","status":"completed","role":"assistant",
+    "content":[{"type":"refusal","refusal":"I cannot help with that."}]
+  }],
+  "usage":{"input_tokens":4,"output_tokens":6,"total_tokens":10}
+}`
+	client, err := New(Config{
+		Provider: ProviderOpenAI,
+		Flavor:   FlavorAPI,
+		Model:    "gpt-test",
+		APIKey:   "test-key",
+		BaseURL:  "https://example.test",
+		HTTPClient: &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(response)),
+				Request:    request,
+			}, nil
+		})},
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	result, err := client.Generate(context.Background(), Request{MaxTokens: 16, Messages: []Message{User("hello")}})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if result.Text != "I cannot help with that." {
+		t.Fatalf("response text = %q, want refusal text", result.Text)
+	}
+	if result.CompletionReason != CompletionReasonRefusal {
+		t.Fatalf("completion reason = %q, want %q", result.CompletionReason, CompletionReasonRefusal)
+	}
+	if result.Usage != (Usage{InputTokens: 4, OutputTokens: 6}) {
+		t.Fatalf("usage = %+v", result.Usage)
+	}
+}
+
+func TestOpenAIGenerateRejectsFailedTerminalResult(t *testing.T) {
+	t.Parallel()
+
+	const response = `{
+  "id":"resp_failed","object":"response","status":"failed","model":"gpt-test","output":[],
+  "error":{"code":"server_error","message":"generation failed"}
+}`
+	server, _ := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{
+		Provider: ProviderOpenAI,
+		Flavor:   FlavorAPI,
+		Model:    "gpt-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	_, err = client.Generate(context.Background(), Request{MaxTokens: 16, Messages: []Message{User("hello")}})
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("Generate() error = %T %v, want *Error", err, err)
+	}
+	if target.Provider != ProviderOpenAI || target.Flavor != FlavorAPI || target.Operation != "generate" {
+		t.Fatalf("error context = %+v", target)
+	}
+	if target.Code != "server_error" {
+		t.Fatalf("error code = %q, want %q", target.Code, "server_error")
 	}
 }

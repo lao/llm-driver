@@ -3,6 +3,7 @@ package llmwrapper
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -62,9 +63,10 @@ func (b *openAIBackend) generate(ctx context.Context, request Request) (*Respons
 		return nil, err
 	}
 	return &Response{
-		ID:    response.ID,
-		Model: string(response.Model),
-		Text:  response.OutputText(),
+		ID:               response.ID,
+		Model:            string(response.Model),
+		Text:             openAIResponseText(response),
+		CompletionReason: openAICompletionReason(response),
 		Usage: Usage{
 			InputTokens:       int(response.Usage.InputTokens),
 			OutputTokens:      int(response.Usage.OutputTokens),
@@ -75,6 +77,11 @@ func (b *openAIBackend) generate(ctx context.Context, request Request) (*Respons
 }
 
 func validateOpenAIResponse(response *responses.Response) error {
+	if response.Status == responses.ResponseStatusIncomplete &&
+		response.IncompleteDetails.Reason == "max_output_tokens" &&
+		response.Error.Code == "" {
+		return nil
+	}
 	if response.Status != responses.ResponseStatusCompleted {
 		code := string(response.Status)
 		message := "OpenAI response did not complete"
@@ -97,27 +104,37 @@ func validateOpenAIResponse(response *responses.Response) error {
 		}
 	}
 
+	return nil
+}
+
+func openAIResponseText(response *responses.Response) string {
+	var text strings.Builder
 	for _, item := range response.Output {
-		if item.Type != "message" {
-			continue
-		}
 		for _, content := range item.Content {
-			if content.Type == "refusal" {
-				message := content.Refusal
-				if message == "" {
-					message = "OpenAI response was refused"
-				}
-				return &Error{
-					Provider:  ProviderOpenAI,
-					Flavor:    FlavorAPI,
-					Operation: "generate",
-					Code:      "refusal",
-					Message:   message,
-				}
+			switch content.Type {
+			case "output_text":
+				text.WriteString(content.Text)
+			case "refusal":
+				text.WriteString(content.Refusal)
 			}
 		}
 	}
-	return nil
+	return text.String()
+}
+
+func openAICompletionReason(response *responses.Response) CompletionReason {
+	if response.Status == responses.ResponseStatusIncomplete &&
+		response.IncompleteDetails.Reason == "max_output_tokens" {
+		return CompletionReasonMaxTokens
+	}
+	for _, item := range response.Output {
+		for _, content := range item.Content {
+			if content.Type == "refusal" {
+				return CompletionReasonRefusal
+			}
+		}
+	}
+	return CompletionReasonStop
 }
 
 func normalizeOpenAIError(err error) error {

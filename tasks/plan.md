@@ -14,7 +14,8 @@ proving one target end-to-end at a time while keeping SDK and process details
 private.
 
 The implementation is a clean break. It does not retain deprecated constructors,
-Messages-service aliases, content-block types, or the old module/package name.
+Messages-service aliases, content-block types, or the old package name. The
+existing module path remains unchanged.
 
 ## Baseline and Migration Constraints
 
@@ -27,8 +28,8 @@ Messages-service aliases, content-block types, or the old module/package name.
 - Default tests stay offline: API tests use `httptest.Server`; CLI tests use an
   injected process runner.
 - The GitHub remote remains `github.com/lao/claudewrap` until the separate
-  repository setting is renamed. The committed Go module path is
-  `github.com/lao/llmwrapper` as approved.
+  repository setting is renamed. The committed Go module path remains
+  `github.com/lao/claudewrap`; only the root package is renamed to `llmwrapper`.
 
 ## Architecture
 
@@ -53,7 +54,8 @@ backend.generate(ctx, Request)  (unexported interface)
 
 - `Config` selects a required `Provider`, `Flavor`, and `Model`.
 - `Client.Generate` accepts `Request{System, Messages, MaxTokens}`.
-- `Response` exposes only neutral text, identity, provider/flavor, and `Usage`.
+- `Response` exposes only neutral text, identity, completion reason,
+  provider/flavor, and `Usage`.
 - `Error` records provider, flavor, operation, HTTP status/process exit code,
   provider code, message, and wrapped cause.
 - `ErrInvalidConfig`, `ErrInvalidRequest`, and `ErrExecutableNotFound` allow
@@ -82,8 +84,8 @@ never imports a provider SDK or exposes subprocess types.
 
 | Target | Request mapping | Result mapping |
 | --- | --- | --- |
-| Claude/API | Messages API system block, structured turns, `max_tokens`, configured model | Text blocks joined; message ID/model; input/output/cache usage |
-| OpenAI/API | Responses API instructions, structured input turns, `max_output_tokens`, configured model | `OutputText`; response ID/model; input/output/cached/reasoning usage |
+| Claude/API | Messages API system block, structured turns, `max_tokens`, configured model | Text blocks joined; message ID/model; neutral completion reason; input/output/cache usage |
+| OpenAI/API | Responses API instructions, structured input turns, `max_output_tokens`, configured model | Output text/refusal; response ID/model; neutral completion reason; input/output/cached/reasoning usage |
 | Claude/CLI | Prompt transcript on stdin; `-p --output-format json --model`; system via CLI flag; no session persistence | JSON result/session ID/usage; non-success subtype becomes normalized error |
 | OpenAI/CLI | Transcript on stdin; system via per-invocation `developer_instructions`; `codex exec --json --ephemeral --sandbox read-only --model ... -` | Final completed agent-message item; turn-completed usage; failed/error events become normalized errors |
 
@@ -94,8 +96,9 @@ This limitation is documented, not silently presented as exact parity.
 
 ### Increment 1 — Package identity and neutral contract
 
-Atomically rename the module/package, remove the old public surface, and install
-the approved neutral types, validation, errors, client, and backend selection.
+Atomically rename the root package while retaining the module path, remove the
+old public surface, and install the approved neutral types, validation, errors,
+client, and backend selection.
 Use a tiny fake backend to prove validation occurs before delegation and that
 response provider/flavor metadata is normalized centrally.
 
@@ -103,7 +106,8 @@ Dependencies: none.
 
 Acceptance checkpoint:
 
-- The module/package compile only as `llmwrapper`.
+- The root package compiles only as `llmwrapper`; `go.mod` retains the fetchable
+  `github.com/lao/claudewrap` module path.
 - All four provider/flavor pairs resolve to an internal target; invalid enums,
   blank models, and invalid requests fail before adapter work.
 - `errors.Is`/`errors.As` work for validation and wrapped operational errors.
@@ -288,8 +292,8 @@ Dependencies: Increments 1–7.
 
 Acceptance checkpoint:
 
-- No active code or documentation uses the old package/module identifier or
-  removed API names.
+- No active code or documentation declares the old package identifier, uses the
+  uncommitted `github.com/lao/llmwrapper` module path, or retains removed API names.
 - All required commands pass from a clean working tree without credentials.
 - The remote branch and GitHub PR exist and match the verified commit.
 
@@ -305,11 +309,13 @@ go test -race ./...
 go test -cover ./...
 go vet ./...
 go build ./examples/switchable
-rg -n 'package claudewrap|github.com/lao/claudewrap' --glob '*.go' --glob 'go.mod' --glob '*.md' --glob '!tasks/**'
+rg -n 'package claudewrap|github.com/lao/llmwrapper' --glob '*.go' --glob 'go.mod' --glob '*.md' --glob '!tasks/**'
+rg -n '^module github.com/lao/claudewrap$' go.mod
 git diff --check origin/main...HEAD
 ```
 
-The stale-identifier `rg` command must produce no matches.
+The stale-identifier `rg` command must produce no matches; the module-path
+command must match the single declaration in `go.mod`.
 
 ## Sequencing and Parallelization
 
@@ -335,7 +341,7 @@ The stale-identifier `rg` command must produce no matches.
 | CLI tools are agentic, unlike hosted text endpoints | Medium | Use non-interactive/ephemeral modes, read-only Codex sandbox, stdin prompts, and explicit README limitations |
 | Usage fields do not align one-to-one | Medium | Keep a small superset of neutral counters and leave unavailable counters zero |
 | CLI max tokens cannot be enforced consistently | Low | Accept the shared request, document the limitation, and never claim exact transport parity |
-| New module path is not fetchable until repository rename | Medium | Call it out in README/PR and avoid changing the remote repository setting without separate approval |
+| Package and module names intentionally differ until repository rename | Medium | Keep the fetchable `github.com/lao/claudewrap` module path in code/docs and distinguish it from package `llmwrapper` in verification |
 
 ## Verification Checkpoints
 
