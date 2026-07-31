@@ -131,6 +131,7 @@ func normalizeOpenAIError(err error) error {
 	if errors.As(err, &apiError) {
 		normalized.Status = apiError.StatusCode
 		normalized.Code = apiError.Code
+		normalized.Message = apiError.Message
 		if normalized.Code == "" {
 			normalized.Code = apiError.Type
 		}

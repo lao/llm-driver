@@ -34,6 +34,9 @@ func TestOpenAIGenerateNormalizesAPIError(t *testing.T) {
 	if target.Status != http.StatusBadRequest || target.Code != "invalid_model" {
 		t.Fatalf("error status/code = %d/%q", target.Status, target.Code)
 	}
+	if target.Message != "bad request" {
+		t.Fatalf("error message = %q, want %q", target.Message, "bad request")
+	}
 }
 
 func TestOpenAIGeneratePreservesTransportError(t *testing.T) {
