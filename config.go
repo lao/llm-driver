@@ -1,4 +1,4 @@
-package claudewrap
+package llmwrapper
 
 import (
 	"fmt"

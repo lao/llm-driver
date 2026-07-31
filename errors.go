@@ -1,48 +1,84 @@
-package claudewrap
+package llmwrapper
 
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
-// Sentinel errors returned for configuration and environment problems.
 var (
-	// ErrInvalidConfig identifies invalid llmwrapper client configuration.
+	// ErrInvalidConfig identifies client configuration rejected by New.
 	ErrInvalidConfig = errors.New("llmwrapper: invalid config")
 	// ErrInvalidRequest identifies a request rejected before provider invocation.
 	ErrInvalidRequest = errors.New("llmwrapper: invalid request")
-	// ErrNoBackend is returned by New when no backend option (WithSDK/WithCLI) is given.
-	ErrNoBackend = errors.New("claudewrap: no backend configured")
-	// ErrCLINotFound is returned by the cli backend when the claude binary is not on PATH.
-	ErrCLINotFound = errors.New("claudewrap: claude CLI not found on PATH")
+	// ErrExecutableNotFound identifies a missing provider CLI executable.
+	ErrExecutableNotFound = errors.New("llmwrapper: executable not found")
 )
 
-// Error is the unified error type both backends wrap failures in.
+// Error adds target and operation context to configuration and runtime failures.
 type Error struct {
-	Backend string // "sdk" | "cli"
-	Op      string // e.g. "messages.new"
-	Status  int    // HTTP status (sdk) or process exit code (cli); 0 if not applicable
-	Type    string // API error type (sdk) when available
-	Message string // human-readable summary
-	Err     error  // wrapped cause, if any
+	Provider  Provider
+	Flavor    Flavor
+	Operation string
+	Status    int
+	Code      string
+	Message   string
+	Err       error
 }
 
+// Error returns a concise target-aware description.
 func (e *Error) Error() string {
-	s := fmt.Sprintf("claudewrap: %s %s", e.Backend, e.Op)
+	if e == nil {
+		return "<nil>"
+	}
+
+	var b strings.Builder
+	b.WriteString("llmwrapper")
+	if target := formatTarget(e.Provider, e.Flavor); target != "" {
+		b.WriteString(": ")
+		b.WriteString(target)
+	}
+	if e.Operation != "" {
+		b.WriteString(": ")
+		b.WriteString(e.Operation)
+	}
 	if e.Status != 0 {
-		s += fmt.Sprintf(" (status %d)", e.Status)
+		fmt.Fprintf(&b, " (status %d)", e.Status)
 	}
-	if e.Type != "" {
-		s += fmt.Sprintf(" [%s]", e.Type)
+	if e.Code != "" {
+		b.WriteString(" [")
+		b.WriteString(e.Code)
+		b.WriteByte(']')
 	}
-	if e.Message != "" {
-		s += ": " + e.Message
+
+	detail := e.Message
+	if detail == "" && e.Err != nil {
+		detail = e.Err.Error()
 	}
-	if e.Err != nil {
-		s += ": " + e.Err.Error()
+	if detail != "" {
+		b.WriteString(": ")
+		b.WriteString(detail)
 	}
-	return s
+	return b.String()
 }
 
-// Unwrap exposes the wrapped cause for errors.Is / errors.As.
-func (e *Error) Unwrap() error { return e.Err }
+// Unwrap exposes the underlying cause for errors.Is and errors.As.
+func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func formatTarget(provider Provider, flavor Flavor) string {
+	switch {
+	case provider != "" && flavor != "":
+		return string(provider) + "/" + string(flavor)
+	case provider != "":
+		return string(provider)
+	case flavor != "":
+		return string(flavor)
+	default:
+		return ""
+	}
+}

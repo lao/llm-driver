@@ -26,19 +26,19 @@ legacy deletions must be kept separate from new behavioral logic in the diff.
 
 **Acceptance criteria:**
 
-- [ ] `go.mod`, every root Go package declaration, exported API, sentinel, and
+- [x] `go.mod`, every root Go package declaration, exported API, sentinel, and
       error prefix use `llmwrapper`; no compatibility API remains.
-- [ ] Exactly the four approved provider/flavor pairs and nonblank models are
+- [x] Exactly the four approved provider/flavor pairs and nonblank models are
       accepted; invalid config/request values fail before adapter invocation.
-- [ ] A fake backend proves `Generate` delegates once and centrally stamps
+- [x] A fake backend proves `Generate` delegates once and centrally stamps
       provider/flavor metadata while preserving `errors.Is`/`errors.As`.
 
 **Verification:**
 
-- [ ] `go test ./... -run 'Test(Config|Request|Client|Error|Message|Usage)'`
-- [ ] `go test ./...`
-- [ ] `go vet ./...`
-- [ ] `git diff --check`
+- [x] `go test ./... -run 'Test(Config|Request|Client|Error|Message|Usage)'`
+- [x] `go test ./...`
+- [x] `go vet ./...`
+- [x] `git diff --check`
 
 **Dependencies:** None.
 
@@ -56,9 +56,9 @@ contract, reviewed as its own checkpoint.
 
 ## Checkpoint: Neutral contract
 
-- [ ] Package identity and API match the approved spec.
-- [ ] Default build/tests are green without provider credentials.
-- [ ] Diff review confirms the large file count is mechanical rather than hidden
+- [x] Package identity and API match the approved spec.
+- [x] Default build/tests are green without provider credentials.
+- [x] Diff review confirms the large file count is mechanical rather than hidden
       feature work.
 
 ## Task 2: Implement the Claude API adapter

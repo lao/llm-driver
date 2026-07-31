@@ -1,12 +1,40 @@
-package claudewrap
+package llmwrapper
 
 import "context"
 
-// backend is the unexported strategy both flavors implement. The public API
-// deals only in neutral types; concrete backends map to/from their transport.
 type backend interface {
-	// messages performs a non-streaming request.
-	messages(ctx context.Context, p MessageParams) (*Response, error)
-	// name reports the flavor: "sdk" or "cli".
-	name() string
+	generate(context.Context, Request) (*Response, error)
+}
+
+type pendingBackend struct {
+	config Config
+}
+
+func (b *pendingBackend) generate(context.Context, Request) (*Response, error) {
+	return nil, &Error{
+		Provider:  b.config.Provider,
+		Flavor:    b.config.Flavor,
+		Operation: "generate",
+		Message:   "backend is not implemented",
+	}
+}
+
+func buildBackend(config Config) (backend, error) {
+	switch {
+	case config.Provider == ProviderClaude && config.Flavor == FlavorAPI:
+		return &pendingBackend{config: config}, nil
+	case config.Provider == ProviderClaude && config.Flavor == FlavorCLI:
+		return &pendingBackend{config: config}, nil
+	case config.Provider == ProviderOpenAI && config.Flavor == FlavorAPI:
+		return &pendingBackend{config: config}, nil
+	case config.Provider == ProviderOpenAI && config.Flavor == FlavorCLI:
+		return &pendingBackend{config: config}, nil
+	default:
+		return nil, &Error{
+			Provider:  config.Provider,
+			Flavor:    config.Flavor,
+			Operation: "client.new",
+			Err:       ErrInvalidConfig,
+		}
+	}
 }
