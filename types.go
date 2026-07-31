@@ -2,6 +2,7 @@ package claudewrap
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -70,7 +71,33 @@ type ContentBlock struct {
 // Message is a single conversational turn.
 type Message struct {
 	Role    Role           `json:"role"`
-	Content []ContentBlock `json:"content"`
+	Text    string         `json:"text,omitempty"`
+	Content []ContentBlock `json:"content,omitempty"`
+}
+
+// Request is a provider-neutral text generation request.
+type Request struct {
+	System    string
+	Messages  []Message
+	MaxTokens int
+}
+
+func (r Request) validate() error {
+	if r.MaxTokens <= 0 {
+		return fmt.Errorf("%w: MaxTokens must be greater than 0", ErrInvalidRequest)
+	}
+	if len(r.Messages) == 0 {
+		return fmt.Errorf("%w: at least one message is required", ErrInvalidRequest)
+	}
+	for i, message := range r.Messages {
+		if message.Role != RoleUser && message.Role != RoleAssistant {
+			return fmt.Errorf("%w: message %d has invalid role %q", ErrInvalidRequest, i, message.Role)
+		}
+		if strings.TrimSpace(message.Text) == "" {
+			return fmt.Errorf("%w: message %d text is required", ErrInvalidRequest, i)
+		}
+	}
+	return nil
 }
 
 // Tool describes a callable tool exposed to the model. Best-effort on the CLI
@@ -96,10 +123,15 @@ type MessageParams struct {
 // Usage reports token accounting for a Response. Counts are int (not int64):
 // token totals per request are far below the 32-bit limit on every model.
 type Usage struct {
-	InputTokens         int `json:"input_tokens"`
-	OutputTokens        int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CachedInputTokens        int `json:"cached_input_tokens,omitempty"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	ReasoningTokens          int `json:"reasoning_tokens,omitempty"`
+
+	// Deprecated neutral-contract migration fields; removed in the cutover.
 	CacheReadTokens     int `json:"cache_read_input_tokens,omitempty"`
-	CacheCreationTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheCreationTokens int `json:"-"`
 }
 
 // Response is the neutral result shape returned by both backends.
@@ -143,4 +175,14 @@ func AssistantMessage(text string) Message {
 // TextBlock builds a text ContentBlock.
 func TextBlock(text string) ContentBlock {
 	return ContentBlock{Type: BlockText, Text: text}
+}
+
+// User builds a user-role text message.
+func User(text string) Message {
+	return Message{Role: RoleUser, Text: text}
+}
+
+// Assistant builds an assistant-role text message.
+func Assistant(text string) Message {
+	return Message{Role: RoleAssistant, Text: text}
 }
