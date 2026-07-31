@@ -89,6 +89,24 @@ type Response struct {
 	Provider Provider
 	Flavor   Flavor
 }
+
+type Usage struct {
+	InputTokens              int
+	OutputTokens             int
+	CachedInputTokens        int
+	CacheCreationInputTokens int
+	ReasoningTokens          int
+}
+
+type Error struct {
+	Provider  Provider
+	Flavor    Flavor
+	Operation string
+	Status    int
+	Code      string
+	Message   string
+	Err       error
+}
 ```
 
 `Provider`, `Flavor`, and `Role` are validated string enums. `Config.Model` is
@@ -295,9 +313,7 @@ substitute for the cases above.
 
 ## Open Questions
 
-1. Confirm that the four-target matrix and clean-break API above match the
-   intended meaning of “provider and flavor.”
-2. Confirm that `github.com/lao/llmwrapper` should be committed before the
-   GitHub repository is renamed. Until that repository setting changes, external
-   consumers cannot fetch the new module path directly.
-
+None. The four-target matrix, clean-break API, and
+`github.com/lao/llmwrapper` module path were approved on 2026-07-31. Until the
+GitHub repository setting is renamed separately, external consumers cannot
+fetch the new module path directly.
