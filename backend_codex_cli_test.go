@@ -39,21 +39,21 @@ func TestCodexCLICommand(t *testing.T) {
 				CLIArgs:  []string{"--color", "never"},
 			},
 			request: Request{
-				System:    "Be concise.",
+				System:    "Be \"concise\".\nUse x = y.",
 				MaxTokens: 32,
 				Messages:  []Message{User("First"), Assistant("Second"), User("Third")},
 			},
 			wantPath: "/opt/bin/codex-custom",
 			wantArgs: []string{
 				"exec", "--json", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "--model", "gpt-test",
+				"--config", `developer_instructions="Be \"concise\".\nUse x = y."`,
 				"--color", "never", "-",
 			},
-			wantPrompt: "System: Be concise.\n\nUser: First\n\nAssistant: Second\n\nUser: Third",
+			wantPrompt: "User: First\n\nAssistant: Second\n\nUser: Third",
 		},
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -62,8 +62,7 @@ func TestCodexCLICommand(t *testing.T) {
 					"{\"type\":\"item.completed\",\"item\":{\"id\":\"item-1\",\"type\":\"agent_message\",\"text\":\"ok\"}}\n" +
 					"{\"type\":\"turn.completed\",\"usage\":{}}\n",
 			)}
-			test.config.runner = runner.run
-			client, err := New(test.config)
+			client, err := newClient(test.config, runner.run)
 			if err != nil {
 				t.Fatalf("New(): %v", err)
 			}
@@ -87,12 +86,11 @@ func TestCodexCLISuccessSelectsFinalMessageAndUsage(t *testing.T) {
 {"type":"item.completed","item":{"id":"message-2","type":"agent_message","text":"Final answer"}}
 {"type":"turn.completed","usage":{"input_tokens":19,"cached_input_tokens":11,"cache_write_input_tokens":5,"output_tokens":7,"reasoning_output_tokens":3}}
 `)}
-	client, err := New(Config{
+	client, err := newClient(Config{
 		Provider: ProviderOpenAI,
 		Flavor:   FlavorCLI,
 		Model:    "gpt-test",
-		runner:   runner.run,
-	})
+	}, runner.run)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
@@ -159,8 +157,18 @@ func TestCodexCLIErrors(t *testing.T) {
 			wantCode: "turn_failed",
 		},
 		{
+			name:     "failed turn with blank message",
+			runner:   &fakeCommandRunner{stdout: []byte("{\"type\":\"turn.failed\",\"error\":{\"message\":\"   \"}}\n")},
+			wantCode: "turn_failed",
+		},
+		{
 			name:     "stream error",
 			runner:   &fakeCommandRunner{stdout: []byte("{\"type\":\"error\",\"message\":\"stream disconnected\"}\n")},
+			wantCode: "error",
+		},
+		{
+			name:     "stream error with blank message",
+			runner:   &fakeCommandRunner{stdout: []byte("{\"type\":\"error\",\"message\":\"   \"}\n")},
 			wantCode: "error",
 		},
 		{
@@ -179,16 +187,14 @@ func TestCodexCLIErrors(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			client, err := New(Config{
+			client, err := newClient(Config{
 				Provider: ProviderOpenAI,
 				Flavor:   FlavorCLI,
 				Model:    "gpt-test",
-				runner:   test.runner.run,
-			})
+			}, test.runner.run)
 			if err != nil {
 				t.Fatalf("New(): %v", err)
 			}

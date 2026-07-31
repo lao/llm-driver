@@ -43,3 +43,17 @@ func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigValidateIgnoresFieldsForOtherFlavor(t *testing.T) {
+	t.Parallel()
+
+	tests := []Config{
+		{Provider: ProviderClaude, Flavor: FlavorCLI, Model: "model", BaseURL: "://unused"},
+		{Provider: ProviderOpenAI, Flavor: FlavorAPI, Model: "model", CLIPath: "  "},
+	}
+	for _, config := range tests {
+		if err := config.validate(); err != nil {
+			t.Errorf("validate(%s/%s): %v", config.Provider, config.Flavor, err)
+		}
+	}
+}

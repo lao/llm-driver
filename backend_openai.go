@@ -14,20 +14,20 @@ type openAIBackend struct {
 	model  string
 }
 
-func newOpenAIBackend(config Config) *openAIBackend {
+func newOpenAIBackend(config apiBackendConfig) *openAIBackend {
 	options := []option.RequestOption{}
-	if config.APIKey != "" {
-		options = append(options, option.WithAPIKey(config.APIKey))
+	if config.apiKey != "" {
+		options = append(options, option.WithAPIKey(config.apiKey))
 	}
-	if config.BaseURL != "" {
-		options = append(options, option.WithBaseURL(config.BaseURL))
+	if config.baseURL != "" {
+		options = append(options, option.WithBaseURL(config.baseURL))
 	}
-	if config.HTTPClient != nil {
-		options = append(options, option.WithHTTPClient(config.HTTPClient))
+	if config.httpClient != nil {
+		options = append(options, option.WithHTTPClient(config.httpClient))
 	}
 	return &openAIBackend{
 		client: openai.NewClient(options...),
-		model:  config.Model,
+		model:  config.model,
 	}
 }
 
@@ -58,6 +58,9 @@ func (b *openAIBackend) generate(ctx context.Context, request Request) (*Respons
 	if err != nil {
 		return nil, normalizeOpenAIError(err)
 	}
+	if err := validateOpenAIResponse(response); err != nil {
+		return nil, err
+	}
 	return &Response{
 		ID:    response.ID,
 		Model: string(response.Model),
@@ -69,6 +72,52 @@ func (b *openAIBackend) generate(ctx context.Context, request Request) (*Respons
 			ReasoningTokens:   int(response.Usage.OutputTokensDetails.ReasoningTokens),
 		},
 	}, nil
+}
+
+func validateOpenAIResponse(response *responses.Response) error {
+	if response.Status != responses.ResponseStatusCompleted {
+		code := string(response.Status)
+		message := "OpenAI response did not complete"
+		if response.Error.Code != "" {
+			code = string(response.Error.Code)
+			message = response.Error.Message
+		} else if response.IncompleteDetails.Reason != "" {
+			code = response.IncompleteDetails.Reason
+			message = "OpenAI response was incomplete: " + response.IncompleteDetails.Reason
+		}
+		if code == "" {
+			code = "unknown_status"
+		}
+		return &Error{
+			Provider:  ProviderOpenAI,
+			Flavor:    FlavorAPI,
+			Operation: "generate",
+			Code:      code,
+			Message:   message,
+		}
+	}
+
+	for _, item := range response.Output {
+		if item.Type != "message" {
+			continue
+		}
+		for _, content := range item.Content {
+			if content.Type == "refusal" {
+				message := content.Refusal
+				if message == "" {
+					message = "OpenAI response was refused"
+				}
+				return &Error{
+					Provider:  ProviderOpenAI,
+					Flavor:    FlavorAPI,
+					Operation: "generate",
+					Code:      "refusal",
+					Message:   message,
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func normalizeOpenAIError(err error) error {

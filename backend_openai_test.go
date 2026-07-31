@@ -2,42 +2,15 @@ package llmwrapper
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
-
-func newOpenAITestServer(t *testing.T, status int, response string) (*httptest.Server, *capturedHTTPRequest) {
-	t.Helper()
-
-	captured := new(capturedHTTPRequest)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		body, err := io.ReadAll(request.Body)
-		if err != nil {
-			t.Errorf("read request: %v", err)
-		}
-		captured.method = request.Method
-		captured.path = request.URL.Path
-		captured.header = request.Header.Clone()
-		if err := json.Unmarshal(body, &captured.body); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_, _ = io.WriteString(w, response)
-	}))
-	t.Cleanup(server.Close)
-	return server, captured
-}
 
 func TestOpenAIGenerateNormalizesAPIError(t *testing.T) {
 	t.Parallel()
 
-	server, _ := newOpenAITestServer(t, http.StatusBadRequest,
+	server, _ := newAPITestServer(t, http.StatusBadRequest,
 		`{"error":{"message":"bad request","type":"invalid_request_error","param":null,"code":"invalid_model"}}`)
 	client, err := New(Config{
 		Provider: ProviderOpenAI,
@@ -117,7 +90,7 @@ func TestOpenAIGenerateMapsRequestAndResponse(t *testing.T) {
     "total_tokens":17
   }
 }`
-	server, captured := newOpenAITestServer(t, http.StatusOK, response)
+	server, captured := newAPITestServer(t, http.StatusOK, response)
 	client, err := New(Config{
 		Provider: ProviderOpenAI,
 		Flavor:   FlavorAPI,
@@ -169,8 +142,73 @@ func TestOpenAIGenerateMapsRequestAndResponse(t *testing.T) {
 	if result.Provider != ProviderOpenAI || result.Flavor != FlavorAPI {
 		t.Fatalf("response target = %s/%s", result.Provider, result.Flavor)
 	}
-	wantUsage := (Usage{InputTokens: 10, OutputTokens: 7, CachedInputTokens: 3, ReasoningTokens: 2})
+	wantUsage := Usage{InputTokens: 10, OutputTokens: 7, CachedInputTokens: 3, ReasoningTokens: 2}
 	if result.Usage != wantUsage {
 		t.Fatalf("usage = %+v, want %+v", result.Usage, wantUsage)
+	}
+}
+
+func TestOpenAIGenerateRejectsNonTextTerminalResults(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		response string
+		wantCode string
+	}{
+		{
+			name: "failed",
+			response: `{
+  "id":"resp_failed","object":"response","status":"failed","model":"gpt-test","output":[],
+  "error":{"code":"server_error","message":"generation failed"}
+}`,
+			wantCode: "server_error",
+		},
+		{
+			name: "incomplete",
+			response: `{
+  "id":"resp_incomplete","object":"response","status":"incomplete","model":"gpt-test","output":[],
+  "incomplete_details":{"reason":"max_output_tokens"}
+}`,
+			wantCode: "max_output_tokens",
+		},
+		{
+			name: "refusal",
+			response: `{
+  "id":"resp_refusal","object":"response","status":"completed","model":"gpt-test",
+  "output":[{"id":"msg_refusal","type":"message","status":"completed","role":"assistant","content":[{"type":"refusal","refusal":"I cannot help with that."}]}]
+}`,
+			wantCode: "refusal",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			server, _ := newAPITestServer(t, http.StatusOK, test.response)
+			client, err := New(Config{
+				Provider: ProviderOpenAI,
+				Flavor:   FlavorAPI,
+				Model:    "gpt-test",
+				APIKey:   "test-key",
+				BaseURL:  server.URL,
+			})
+			if err != nil {
+				t.Fatalf("New(): %v", err)
+			}
+
+			_, err = client.Generate(context.Background(), Request{MaxTokens: 16, Messages: []Message{User("hello")}})
+			var target *Error
+			if !errors.As(err, &target) {
+				t.Fatalf("Generate() error = %T %v, want *Error", err, err)
+			}
+			if target.Provider != ProviderOpenAI || target.Flavor != FlavorAPI || target.Operation != "generate" {
+				t.Fatalf("error context = %+v", target)
+			}
+			if target.Code != test.wantCode {
+				t.Fatalf("error code = %q, want %q", target.Code, test.wantCode)
+			}
+		})
 	}
 }

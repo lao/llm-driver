@@ -14,20 +14,20 @@ type anthropicBackend struct {
 	model  string
 }
 
-func newAnthropicBackend(config Config) *anthropicBackend {
+func newAnthropicBackend(config apiBackendConfig) *anthropicBackend {
 	options := []option.RequestOption{}
-	if config.APIKey != "" {
-		options = append(options, option.WithAPIKey(config.APIKey))
+	if config.apiKey != "" {
+		options = append(options, option.WithAPIKey(config.apiKey))
 	}
-	if config.BaseURL != "" {
-		options = append(options, option.WithBaseURL(config.BaseURL))
+	if config.baseURL != "" {
+		options = append(options, option.WithBaseURL(config.baseURL))
 	}
-	if config.HTTPClient != nil {
-		options = append(options, option.WithHTTPClient(config.HTTPClient))
+	if config.httpClient != nil {
+		options = append(options, option.WithHTTPClient(config.httpClient))
 	}
 	return &anthropicBackend{
 		client: anthropic.NewClient(options...),
-		model:  config.Model,
+		model:  config.model,
 	}
 }
 

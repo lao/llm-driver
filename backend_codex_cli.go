@@ -38,8 +38,8 @@ type codexCLIEvent struct {
 	} `json:"usage"`
 }
 
-func newCodexCLIBackend(config Config) *codexCLIBackend {
-	path := config.CLIPath
+func newCodexCLIBackend(config cliBackendConfig) *codexCLIBackend {
+	path := config.path
 	if path == "" {
 		path = "codex"
 	}
@@ -48,9 +48,9 @@ func newCodexCLIBackend(config Config) *codexCLIBackend {
 		runner = defaultCommandRunner
 	}
 	return &codexCLIBackend{
-		model:  config.Model,
+		model:  config.model,
 		path:   path,
-		args:   append([]string(nil), config.CLIArgs...),
+		args:   append([]string(nil), config.args...),
 		runner: runner,
 	}
 }
@@ -64,6 +64,9 @@ func (b *codexCLIBackend) generate(ctx context.Context, request Request) (*Respo
 		"--skip-git-repo-check",
 		"--model", b.model,
 	}
+	if request.System != "" {
+		args = append(args, "--config", codexDeveloperInstructions(request.System))
+	}
 	args = append(args, b.args...)
 	args = append(args, "-")
 
@@ -72,7 +75,7 @@ func (b *codexCLIBackend) generate(ctx context.Context, request Request) (*Respo
 		ProviderOpenAI,
 		b.path,
 		args,
-		[]byte(renderCodexPrompt(request)),
+		[]byte(renderTranscript(request.Messages)),
 		b.runner,
 	)
 	if err != nil {
@@ -81,15 +84,9 @@ func (b *codexCLIBackend) generate(ctx context.Context, request Request) (*Respo
 	return parseCodexCLIOutput(stdout, b.model)
 }
 
-func renderCodexPrompt(request Request) string {
-	transcript := renderTranscript(request.Messages)
-	if request.System == "" {
-		return transcript
-	}
-	if len(request.Messages) == 1 && request.Messages[0].Role == RoleUser {
-		transcript = "User: " + transcript
-	}
-	return "System: " + request.System + "\n\n" + transcript
+func codexDeveloperInstructions(system string) string {
+	encoded, _ := json.Marshal(system)
+	return "developer_instructions=" + string(encoded)
 }
 
 func parseCodexCLIOutput(output []byte, model string) (*Response, error) {
@@ -131,13 +128,13 @@ func parseCodexCLIOutput(output []byte, model string) (*Response, error) {
 				ReasoningTokens:          event.Usage.ReasoningOutputTokens,
 			}
 		case "turn.failed":
-			message := event.Error.Message
+			message := strings.TrimSpace(event.Error.Message)
 			if message == "" {
 				message = "Codex CLI turn failed"
 			}
 			return nil, codexCLIResultError("turn_failed", message)
 		case "error":
-			message := event.Message
+			message := strings.TrimSpace(event.Message)
 			if message == "" {
 				message = "Codex CLI stream failed"
 			}

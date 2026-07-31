@@ -24,12 +24,11 @@ func TestContractGenerateAcrossFourTargets(t *testing.T) {
 	}
 
 	for _, target := range targets {
-		target := target
 		t.Run(string(target.provider)+"/"+string(target.flavor), func(t *testing.T) {
 			t.Parallel()
 
-			config, calls := newContractTarget(t, target.provider, target.flavor)
-			client, err := New(config)
+			config, runner, calls := newContractTarget(t, target.provider, target.flavor)
+			client, err := newClient(config, runner)
 			if err != nil {
 				t.Fatalf("New(): %v", err)
 			}
@@ -85,8 +84,6 @@ func TestContractTargetMatrix(t *testing.T) {
 	flavors := []Flavor{FlavorAPI, FlavorCLI, "other"}
 	for _, provider := range providers {
 		for _, flavor := range flavors {
-			provider := provider
-			flavor := flavor
 			t.Run(string(provider)+"/"+string(flavor), func(t *testing.T) {
 				t.Parallel()
 
@@ -104,7 +101,7 @@ func TestContractTargetMatrix(t *testing.T) {
 	}
 }
 
-func newContractTarget(t *testing.T, provider Provider, flavor Flavor) (Config, func() int) {
+func newContractTarget(t *testing.T, provider Provider, flavor Flavor) (Config, commandRunner, func() int) {
 	t.Helper()
 
 	config := Config{Provider: provider, Flavor: flavor, Model: "contract-model"}
@@ -127,11 +124,11 @@ func newContractTarget(t *testing.T, provider Provider, flavor Flavor) (Config, 
 {"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":4}}
 `)
 		}
-		config.runner = func(ctx context.Context, name string, args []string, stdin []byte) ([]byte, []byte, int, error) {
+		run := func(ctx context.Context, name string, args []string, stdin []byte) ([]byte, []byte, int, error) {
 			calls.Add(1)
 			return runner.run(ctx, name, args, stdin)
 		}
-		return config, callCount
+		return config, run, callCount
 	}
 
 	response := `{
@@ -168,5 +165,5 @@ func newContractTarget(t *testing.T, provider Provider, flavor Flavor) (Config, 
 	t.Cleanup(server.Close)
 	config.APIKey = "contract-key"
 	config.BaseURL = server.URL
-	return config, callCount
+	return config, nil, callCount
 }

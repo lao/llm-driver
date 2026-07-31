@@ -85,7 +85,7 @@ never imports a provider SDK or exposes subprocess types.
 | Claude/API | Messages API system block, structured turns, `max_tokens`, configured model | Text blocks joined; message ID/model; input/output/cache usage |
 | OpenAI/API | Responses API instructions, structured input turns, `max_output_tokens`, configured model | `OutputText`; response ID/model; input/output/cached/reasoning usage |
 | Claude/CLI | Prompt transcript on stdin; `-p --output-format json --model`; system via CLI flag; no session persistence | JSON result/session ID/usage; non-success subtype becomes normalized error |
-| OpenAI/CLI | Prompt including system/transcript on stdin; `codex exec --json --ephemeral --sandbox read-only --model ... -` | Final completed agent-message item; turn-completed usage; failed/error events become normalized errors |
+| OpenAI/CLI | Transcript on stdin; system via per-invocation `developer_instructions`; `codex exec --json --ephemeral --sandbox read-only --model ... -` | Final completed agent-message item; turn-completed usage; failed/error events become normalized errors |
 
 CLI `MaxTokens` has no reliable equivalent and is accepted but not translated.
 This limitation is documented, not silently presented as exact parity.

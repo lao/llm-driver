@@ -96,11 +96,13 @@ changing the example's generation code.
 API targets use their official Go SDKs. Set `ANTHROPIC_API_KEY` or
 `OPENAI_API_KEY`, or pass `Config.APIKey`. `Config.BaseURL` and
 `Config.HTTPClient` are optional overrides for proxies, custom transports, and
-tests.
+tests. Treat custom endpoints and transports as trusted application
+configuration: API credentials and prompts are sent through them.
 
 CLI targets use the installed tool's existing login. `CLIPath` can select a
 nonstandard executable and `CLIArgs` appends direct arguments. Prompts are sent
-through stdin and no shell is invoked.
+through stdin and no shell is invoked. Treat both CLI options as trusted
+application configuration because they control local process execution.
 
 Errors carry provider, flavor, operation, status, and provider code when those
 values are available. Use `errors.Is` for sentinels such as
@@ -119,8 +121,12 @@ the hosted APIs:
 - Claude CLI runs without session persistence. Codex runs ephemerally with a
   read-only sandbox. Agent CLI behavior can still differ from a hosted model
   endpoint.
-- System text is passed through Claude's system-prompt flag and included in the
-  Codex stdin prompt.
+- System text is passed through Claude's system-prompt flag and Codex's
+  per-invocation developer-instructions setting. Conversation text stays on
+  stdin. System text may therefore be visible to local process inspection.
+- CLI subprocesses inherit the application's working directory and environment
+  so local authentication works. Codex's read-only sandbox prevents writes, not
+  reads; isolate the host process when prompts are not trusted.
 - Usage fields are populated only when a target reports them.
 
 Streaming, tool/function calling, images, structured output, retries, automatic

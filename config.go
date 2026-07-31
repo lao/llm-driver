@@ -47,8 +47,6 @@ type Config struct {
 	CLIPath string
 	// CLIArgs appends direct arguments to the selected CLI command.
 	CLIArgs []string
-
-	runner commandRunner
 }
 
 func (c Config) validate() error {
@@ -61,13 +59,13 @@ func (c Config) validate() error {
 	if strings.TrimSpace(c.Model) == "" {
 		return fmt.Errorf("%w: model is required", ErrInvalidConfig)
 	}
-	if c.BaseURL != "" {
+	if c.Flavor == FlavorAPI && c.BaseURL != "" {
 		u, err := url.Parse(c.BaseURL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return fmt.Errorf("%w: base URL must be an absolute HTTP(S) URL", ErrInvalidConfig)
 		}
 	}
-	if c.CLIPath != "" && strings.TrimSpace(c.CLIPath) == "" {
+	if c.Flavor == FlavorCLI && c.CLIPath != "" && strings.TrimSpace(c.CLIPath) == "" {
 		return fmt.Errorf("%w: CLI path cannot be whitespace", ErrInvalidConfig)
 	}
 	return nil

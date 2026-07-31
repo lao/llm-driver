@@ -55,8 +55,10 @@ func TestClientGenerateDelegatesAndStampsTarget(t *testing.T) {
 	request := Request{MaxTokens: 32, Messages: []Message{User("hello")}}
 	fake := &fakeGenerationBackend{response: &Response{ID: "response-1", Model: "model", Text: "hi"}}
 	client := &Client{
-		config:  Config{Provider: ProviderOpenAI, Flavor: FlavorCLI, Model: "model"},
-		backend: fake,
+		provider: ProviderOpenAI,
+		flavor:   FlavorCLI,
+		model:    "model",
+		backend:  fake,
 	}
 
 	response, err := client.Generate(context.Background(), request)
@@ -76,8 +78,10 @@ func TestClientGenerateValidatesBeforeDelegating(t *testing.T) {
 
 	fake := &fakeGenerationBackend{}
 	client := &Client{
-		config:  Config{Provider: ProviderClaude, Flavor: FlavorAPI, Model: "model"},
-		backend: fake,
+		provider: ProviderClaude,
+		flavor:   FlavorAPI,
+		model:    "model",
+		backend:  fake,
 	}
 
 	_, err := client.Generate(context.Background(), Request{})

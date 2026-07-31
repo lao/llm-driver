@@ -2,25 +2,15 @@ package llmwrapper
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
-
-type capturedHTTPRequest struct {
-	method string
-	path   string
-	header http.Header
-	body   map[string]any
-}
 
 func TestAnthropicGenerateNormalizesAPIError(t *testing.T) {
 	t.Parallel()
 
-	server, _ := newAnthropicTestServer(t, http.StatusBadRequest,
+	server, _ := newAPITestServer(t, http.StatusBadRequest,
 		`{"type":"error","error":{"type":"invalid_request_error","message":"bad request"}}`)
 	client, err := New(Config{
 		Provider: ProviderClaude,
@@ -79,30 +69,6 @@ func TestAnthropicGeneratePreservesTransportError(t *testing.T) {
 	}
 }
 
-func newAnthropicTestServer(t *testing.T, status int, response string) (*httptest.Server, *capturedHTTPRequest) {
-	t.Helper()
-
-	captured := new(capturedHTTPRequest)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		body, err := io.ReadAll(request.Body)
-		if err != nil {
-			t.Errorf("read request: %v", err)
-		}
-		captured.method = request.Method
-		captured.path = request.URL.Path
-		captured.header = request.Header.Clone()
-		if err := json.Unmarshal(body, &captured.body); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_, _ = io.WriteString(w, response)
-	}))
-	t.Cleanup(server.Close)
-	return server, captured
-}
-
 func TestAnthropicGenerateMapsRequestAndResponse(t *testing.T) {
 	t.Parallel()
 
@@ -124,7 +90,7 @@ func TestAnthropicGenerateMapsRequestAndResponse(t *testing.T) {
     "cache_creation_input_tokens":2
   }
 }`
-	server, captured := newAnthropicTestServer(t, http.StatusOK, response)
+	server, captured := newAPITestServer(t, http.StatusOK, response)
 	client, err := New(Config{
 		Provider: ProviderClaude,
 		Flavor:   FlavorAPI,
@@ -177,7 +143,7 @@ func TestAnthropicGenerateMapsRequestAndResponse(t *testing.T) {
 	if result.Provider != ProviderClaude || result.Flavor != FlavorAPI {
 		t.Fatalf("response target = %s/%s", result.Provider, result.Flavor)
 	}
-	wantUsage := (Usage{InputTokens: 10, OutputTokens: 5, CachedInputTokens: 3, CacheCreationInputTokens: 2})
+	wantUsage := Usage{InputTokens: 10, OutputTokens: 5, CachedInputTokens: 3, CacheCreationInputTokens: 2}
 	if result.Usage != wantUsage {
 		t.Fatalf("usage = %+v, want %+v", result.Usage, wantUsage)
 	}

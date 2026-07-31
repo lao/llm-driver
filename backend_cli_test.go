@@ -3,8 +3,10 @@ package llmwrapper
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"testing"
+	"time"
 )
 
 type fakeCommandRunner struct {
@@ -76,5 +78,43 @@ func TestCommandMissingExecutable(t *testing.T) {
 	)
 	if !errors.Is(err, ErrExecutableNotFound) {
 		t.Fatalf("defaultCommandRunner() error = %v, want ErrExecutableNotFound", err)
+	}
+}
+
+func TestCommandPreservesDeadline(t *testing.T) {
+	t.Setenv("LLMWRAPPER_HELPER_PROCESS", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, _, _, err := defaultCommandRunner(
+		ctx,
+		os.Args[0],
+		[]string{"-test.run=^TestCommandHelperProcess$"},
+		nil,
+	)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("defaultCommandRunner() error = %v, want context deadline", err)
+	}
+}
+
+func TestCommandHelperProcess(t *testing.T) {
+	if os.Getenv("LLMWRAPPER_HELPER_PROCESS") != "1" {
+		return
+	}
+	for {
+		time.Sleep(time.Hour)
+	}
+}
+
+func TestCommandOutputIsBounded(t *testing.T) {
+	t.Parallel()
+
+	buffer := newBoundedBuffer(4)
+	written, err := buffer.Write([]byte("123456"))
+	if written != 4 || !errors.Is(err, errCLIOutputTooLarge) {
+		t.Fatalf("Write() = %d, %v", written, err)
+	}
+	if got := string(buffer.Bytes()); got != "1234" {
+		t.Fatalf("buffer = %q", got)
 	}
 }

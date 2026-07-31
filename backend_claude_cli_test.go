@@ -54,13 +54,11 @@ func TestClaudeCLICommand(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
 			runner := &fakeCommandRunner{stdout: []byte(`{"type":"result","subtype":"success","result":"ok"}`)}
-			test.config.runner = runner.run
-			client, err := New(test.config)
+			client, err := newClient(test.config, runner.run)
 			if err != nil {
 				t.Fatalf("New(): %v", err)
 			}
@@ -89,12 +87,11 @@ func TestClaudeCLISuccess(t *testing.T) {
     "cache_creation_input_tokens":3
   }
 }`)}
-	client, err := New(Config{
+	client, err := newClient(Config{
 		Provider: ProviderClaude,
 		Flavor:   FlavorCLI,
 		Model:    "claude-test",
-		runner:   runner.run,
-	})
+	}, runner.run)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
@@ -113,7 +110,7 @@ func TestClaudeCLISuccess(t *testing.T) {
 	if response.Provider != ProviderClaude || response.Flavor != FlavorCLI {
 		t.Fatalf("response target = %s/%s", response.Provider, response.Flavor)
 	}
-	wantUsage := (Usage{InputTokens: 11, OutputTokens: 7, CachedInputTokens: 5, CacheCreationInputTokens: 3})
+	wantUsage := Usage{InputTokens: 11, OutputTokens: 7, CachedInputTokens: 5, CacheCreationInputTokens: 3}
 	if response.Usage != wantUsage {
 		t.Fatalf("usage = %+v, want %+v", response.Usage, wantUsage)
 	}
@@ -157,21 +154,24 @@ func TestClaudeCLIErrors(t *testing.T) {
 		{
 			name:     "error result",
 			runner:   &fakeCommandRunner{stdout: []byte(`{"type":"result","subtype":"success","is_error":true,"result":"provider rejected request"}`)},
-			wantCode: "success",
+			wantCode: "error",
+		},
+		{
+			name:     "unexpected result type",
+			runner:   &fakeCommandRunner{stdout: []byte(`{"type":"unexpected","subtype":"success","result":"wrong payload"}`)},
+			wantCode: "unexpected",
 		},
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			client, err := New(Config{
+			client, err := newClient(Config{
 				Provider: ProviderClaude,
 				Flavor:   FlavorCLI,
 				Model:    "claude-test",
-				runner:   test.runner.run,
-			})
+			}, test.runner.run)
 			if err != nil {
 				t.Fatalf("New(): %v", err)
 			}

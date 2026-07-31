@@ -9,7 +9,37 @@ import (
 	"strings"
 )
 
+const maxCLIOutputBytes = 16 << 20
+
+var errCLIOutputTooLarge = errors.New("llmwrapper: CLI output exceeds limit")
+
 type commandRunner func(context.Context, string, []string, []byte) ([]byte, []byte, int, error)
+
+type boundedBuffer struct {
+	buffer   bytes.Buffer
+	limit    int
+	overflow bool
+}
+
+func newBoundedBuffer(limit int) *boundedBuffer {
+	return &boundedBuffer{limit: limit}
+}
+
+func (b *boundedBuffer) Write(data []byte) (int, error) {
+	remaining := b.limit - b.buffer.Len()
+	if len(data) <= remaining {
+		return b.buffer.Write(data)
+	}
+	if remaining > 0 {
+		_, _ = b.buffer.Write(data[:remaining])
+	}
+	b.overflow = true
+	return max(remaining, 0), errCLIOutputTooLarge
+}
+
+func (b *boundedBuffer) Bytes() []byte {
+	return b.buffer.Bytes()
+}
 
 func defaultCommandRunner(ctx context.Context, name string, args []string, stdin []byte) ([]byte, []byte, int, error) {
 	path, err := exec.LookPath(name)
@@ -19,14 +49,20 @@ func defaultCommandRunner(ctx context.Context, name string, args []string, stdin
 
 	command := exec.CommandContext(ctx, path, args...)
 	command.Stdin = bytes.NewReader(stdin)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
+	stdout := newBoundedBuffer(maxCLIOutputBytes)
+	stderr := newBoundedBuffer(maxCLIOutputBytes)
+	command.Stdout = stdout
+	command.Stderr = stderr
 
 	err = command.Run()
 	if err == nil {
 		return stdout.Bytes(), stderr.Bytes(), 0, nil
+	}
+	if ctx.Err() != nil {
+		return stdout.Bytes(), stderr.Bytes(), 0, ctx.Err()
+	}
+	if stdout.overflow || stderr.overflow {
+		return stdout.Bytes(), stderr.Bytes(), 0, errCLIOutputTooLarge
 	}
 
 	var exitError *exec.ExitError

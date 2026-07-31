@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 type claudeCLIBackend struct {
@@ -27,8 +28,8 @@ type claudeCLIResult struct {
 	} `json:"usage"`
 }
 
-func newClaudeCLIBackend(config Config) *claudeCLIBackend {
-	path := config.CLIPath
+func newClaudeCLIBackend(config cliBackendConfig) *claudeCLIBackend {
+	path := config.path
 	if path == "" {
 		path = "claude"
 	}
@@ -37,9 +38,9 @@ func newClaudeCLIBackend(config Config) *claudeCLIBackend {
 		runner = defaultCommandRunner
 	}
 	return &claudeCLIBackend{
-		model:  config.Model,
+		model:  config.model,
 		path:   path,
-		args:   append([]string(nil), config.CLIArgs...),
+		args:   append([]string(nil), config.args...),
 		runner: runner,
 	}
 }
@@ -67,7 +68,10 @@ func (b *claudeCLIBackend) generate(ctx context.Context, request Request) (*Resp
 	if err != nil {
 		return nil, err
 	}
+	return parseClaudeCLIOutput(stdout, b.model)
+}
 
+func parseClaudeCLIOutput(stdout []byte, model string) (*Response, error) {
 	var result claudeCLIResult
 	if err := json.Unmarshal(stdout, &result); err != nil {
 		return nil, &Error{
@@ -79,25 +83,21 @@ func (b *claudeCLIBackend) generate(ctx context.Context, request Request) (*Resp
 	}
 	if result.Type != "result" || result.Subtype != "success" || result.IsError {
 		message := result.Result
-		if message == "" {
+		if strings.TrimSpace(message) == "" {
 			message = "Claude CLI returned an unsuccessful result"
-		}
-		code := result.Subtype
-		if code == "" {
-			code = result.Type
 		}
 		return nil, &Error{
 			Provider:  ProviderClaude,
 			Flavor:    FlavorCLI,
 			Operation: "generate",
-			Code:      code,
+			Code:      claudeCLIErrorCode(result),
 			Message:   message,
 		}
 	}
 
 	return &Response{
 		ID:    result.SessionID,
-		Model: b.model,
+		Model: model,
 		Text:  result.Result,
 		Usage: Usage{
 			InputTokens:              result.Usage.InputTokens,
@@ -106,4 +106,17 @@ func (b *claudeCLIBackend) generate(ctx context.Context, request Request) (*Resp
 			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
 		},
 	}, nil
+}
+
+func claudeCLIErrorCode(result claudeCLIResult) string {
+	if result.Subtype != "" && result.Subtype != "success" {
+		return result.Subtype
+	}
+	if result.IsError {
+		return "error"
+	}
+	if result.Type != "" && result.Type != "result" {
+		return result.Type
+	}
+	return "unsuccessful_result"
 }
