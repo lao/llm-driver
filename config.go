@@ -39,6 +39,8 @@ type Config struct {
 
 	CLIPath string
 	CLIArgs []string
+
+	runner commandRunner
 }
 
 func (c Config) validate() error {

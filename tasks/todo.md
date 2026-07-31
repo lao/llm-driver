@@ -145,19 +145,19 @@ execution stays injectable.
 
 **Acceptance criteria:**
 
-- [ ] Tests assert exact executable/argv/stdin for system, single-turn, and
+- [x] Tests assert exact executable/argv/stdin for system, single-turn, and
       multi-turn requests, including configured path/extra arguments.
-- [ ] Claude success JSON maps response text/session/usage with
+- [x] Claude success JSON maps response text/session/usage with
       `ProviderClaude`/`FlavorCLI`.
-- [ ] Missing executable, launch failure, non-zero exit, malformed JSON, and
+- [x] Missing executable, launch failure, non-zero exit, malformed JSON, and
       non-success subtype map to stable sentinels/contextual errors.
 
 **Verification:**
 
-- [ ] `go test ./... -run 'Test(ClaudeCLI|Prompt|Command)'`
-- [ ] `go test ./...`
-- [ ] `go vet ./...`
-- [ ] `git diff --check`
+- [x] `go test ./... -run 'Test(ClaudeCLI|Prompt|Command)'`
+- [x] `go test ./...`
+- [x] `go vet ./...`
+- [x] `git diff --check`
 
 **Dependencies:** Task 1; executed after the API checkpoint.
 

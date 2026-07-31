@@ -36,6 +36,40 @@ func defaultCommandRunner(ctx context.Context, name string, args []string, stdin
 	return stdout.Bytes(), stderr.Bytes(), 0, err
 }
 
+func executeCLI(
+	ctx context.Context,
+	provider Provider,
+	name string,
+	args []string,
+	stdin []byte,
+	runner commandRunner,
+) ([]byte, error) {
+	stdout, stderr, exitCode, err := runner(ctx, name, args, stdin)
+	if err != nil {
+		return nil, &Error{
+			Provider:  provider,
+			Flavor:    FlavorCLI,
+			Operation: "generate",
+			Message:   strings.TrimSpace(string(stderr)),
+			Err:       err,
+		}
+	}
+	if exitCode != 0 {
+		message := strings.TrimSpace(string(stderr))
+		if message == "" {
+			message = "CLI command failed"
+		}
+		return nil, &Error{
+			Provider:  provider,
+			Flavor:    FlavorCLI,
+			Operation: "generate",
+			Status:    exitCode,
+			Message:   message,
+		}
+	}
+	return stdout, nil
+}
+
 func renderTranscript(messages []Message) string {
 	if len(messages) == 1 && messages[0].Role == RoleUser {
 		return messages[0].Text
