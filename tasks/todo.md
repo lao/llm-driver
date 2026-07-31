@@ -251,18 +251,18 @@ adding a CLI framework.
 
 **Acceptance criteria:**
 
-- [ ] `--provider`, `--flavor`, `--model`, and `--prompt` are required/validated;
+- [x] `--provider`, `--flavor`, `--model`, and `--prompt` are required/validated;
       `--max-tokens` has a documented positive default.
-- [ ] Valid flags create the expected config/request; invalid values produce a
+- [x] Valid flags create the expected config/request; invalid values produce a
       concise error and non-zero exit.
-- [ ] `--help` describes API-key environment variables and local CLI auth.
+- [x] `--help` describes API-key environment variables and local CLI auth.
 
 **Verification:**
 
-- [ ] `go test ./examples/switchable`
-- [ ] `go build ./examples/switchable`
-- [ ] `go run ./examples/switchable --help`
-- [ ] `git diff --check`
+- [x] `go test ./examples/switchable`
+- [x] `go build ./examples/switchable`
+- [x] `go run ./examples/switchable --help`
+- [x] `git diff --check`
 
 **Dependencies:** Task 6.
 
