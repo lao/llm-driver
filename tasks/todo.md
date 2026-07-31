@@ -179,19 +179,19 @@ and normalize terminal and process failures.
 
 **Acceptance criteria:**
 
-- [ ] Tests assert `codex exec` non-interactive/read-only/ephemeral argv and the
+- [x] Tests assert `codex exec` non-interactive/read-only/ephemeral argv and the
       rendered request on stdin, including custom CLI configuration.
-- [ ] Progress/reasoning events are ignored; the final agent message and
+- [x] Progress/reasoning events are ignored; the final agent message and
       cached/reasoning usage map with `ProviderOpenAI`/`FlavorCLI`.
-- [ ] Failed turns, error events, missing final messages, malformed JSONL,
+- [x] Failed turns, error events, missing final messages, malformed JSONL,
       missing executable, and non-zero exits return contextual errors.
 
 **Verification:**
 
-- [ ] `go test ./... -run 'TestCodexCLI'`
-- [ ] `go test ./...`
-- [ ] `go vet ./...`
-- [ ] `git diff --check`
+- [x] `go test ./... -run 'TestCodexCLI'`
+- [x] `go test ./...`
+- [x] `go vet ./...`
+- [x] `git diff --check`
 
 **Dependencies:** Task 4.
 
@@ -205,10 +205,10 @@ and normalize terminal and process failures.
 
 ## Checkpoint: CLI flavors
 
-- [ ] Both CLI adapters pass independently and together.
-- [ ] `go test -race ./...`
-- [ ] No default test starts `claude` or `codex`.
-- [ ] Only the shared default runner imports `os/exec`; prompts never enter a
+- [x] Both CLI adapters pass independently and together.
+- [x] `go test -race ./...`
+- [x] No default test starts `claude` or `codex`.
+- [x] Only the shared default runner imports `os/exec`; prompts never enter a
       shell command string.
 
 ## Task 6: Prove the four-target contract
