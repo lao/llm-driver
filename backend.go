@@ -26,7 +26,7 @@ func buildBackend(config Config) (backend, error) {
 	case config.Provider == ProviderClaude && config.Flavor == FlavorCLI:
 		return &pendingBackend{config: config}, nil
 	case config.Provider == ProviderOpenAI && config.Flavor == FlavorAPI:
-		return &pendingBackend{config: config}, nil
+		return newOpenAIBackend(config), nil
 	case config.Provider == ProviderOpenAI && config.Flavor == FlavorCLI:
 		return &pendingBackend{config: config}, nil
 	default:

@@ -153,7 +153,8 @@ will be visible in the README.
 
 - Go 1.24, matching the current `go.mod`.
 - `github.com/anthropics/anthropic-sdk-go` v1.58.1 (existing pinned dependency).
-- `github.com/openai/openai-go/v3` v3.48.0 (official SDK; Responses API).
+- `github.com/openai/openai-go/v3` v3.44.0 (latest release compatible with the
+  approved Go 1.24 baseline; official SDK, Responses API).
 - Go standard library for process execution, JSON/JSONL parsing, HTTP test
   servers, flags, and tests.
 

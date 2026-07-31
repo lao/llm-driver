@@ -103,19 +103,19 @@ normalize text, response identity, usage, and SDK errors.
 
 **Acceptance criteria:**
 
-- [ ] Captured requests use `/responses` with the expected structured input,
+- [x] Captured requests use `/responses` with the expected structured input,
       instructions, model, and output-token limit.
-- [ ] Successful output text plus cached/reasoning usage maps to the neutral
+- [x] Successful output text plus cached/reasoning usage maps to the neutral
       response with `ProviderOpenAI`/`FlavorAPI`.
-- [ ] Non-2xx and transport failures preserve HTTP status, provider code, and
+- [x] Non-2xx and transport failures preserve HTTP status, provider code, and
       wrapped cause without leaking SDK types.
 
 **Verification:**
 
-- [ ] `go test ./... -run 'TestOpenAI'`
-- [ ] `go test ./...`
-- [ ] `go vet ./...`
-- [ ] `git diff --check`
+- [x] `go test ./... -run 'TestOpenAI'`
+- [x] `go test ./...`
+- [x] `go vet ./...`
+- [x] `git diff --check`
 
 **Dependencies:** Task 1; executed after Task 2 for a simple review sequence.
 
@@ -131,10 +131,10 @@ normalize text, response identity, usage, and SDK errors.
 
 ## Checkpoint: API flavors
 
-- [ ] Both API adapters pass independently and together.
-- [ ] `go test -race ./...`
-- [ ] Provider SDK imports occur only in their own adapters/tests.
-- [ ] Captured-wire tests prove Messages vs. Responses endpoint selection.
+- [x] Both API adapters pass independently and together.
+- [x] `go test -race ./...`
+- [x] Provider SDK imports occur only in their own adapters/tests.
+- [x] Captured-wire tests prove Messages vs. Responses endpoint selection.
 
 ## Task 4: Implement the shared runner and Claude CLI adapter
 

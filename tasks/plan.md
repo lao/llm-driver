@@ -329,7 +329,7 @@ The stale-identifier `rg` command must produce no matches.
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
 | Public rename/API replacement creates a wide diff | High | Separate mechanical identity changes from adapter behavior in commits and review the stale-identifier search |
-| OpenAI SDK Responses unions are easy to map incorrectly | High | Pin v3.48.0, inspect actual types with `go doc`, and assert captured wire JSON through `httptest` |
+| OpenAI SDK Responses unions are easy to map incorrectly | High | Pin Go-1.24-compatible v3.44.0, inspect actual types with `go doc`, and assert captured wire JSON through `httptest` |
 | SDK base-URL semantics differ | Medium | Give each adapter its own test-server setup and assert request path/method |
 | CLI output schemas drift between installed versions | High | Parse only documented fields/events, ignore unknown JSON fields, and cover malformed/missing terminal events |
 | CLI tools are agentic, unlike hosted text endpoints | Medium | Use non-interactive/ephemeral modes, read-only Codex sandbox, stdin prompts, and explicit README limitations |
