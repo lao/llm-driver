@@ -15,7 +15,7 @@ Changing the provider, flavor, or model does not change application call sites.
 ## Install
 
 ```bash
-go get github.com/lao/claudewrap
+go get github.com/lao/llmwrapper
 ```
 
 The module requires Go 1.24 or later.
@@ -30,7 +30,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/lao/claudewrap"
+	"github.com/lao/llmwrapper"
 )
 
 func main() {
@@ -151,7 +151,7 @@ so a renamed or removed flag surfaces instead of failing only at runtime. It is
 excluded by default and skips when a binary or model is missing:
 
 ```bash
-CLAUDEWRAP_CLAUDE_CLI_MODEL=claude-sonnet-4-5 \
-CLAUDEWRAP_CODEX_CLI_MODEL=gpt-5.6-sol \
+LLMWRAPPER_CLAUDE_CLI_MODEL=claude-sonnet-4-5 \
+LLMWRAPPER_CODEX_CLI_MODEL=gpt-5.6-sol \
   go test -tags integration -run 'CLIIntegration' .
 ```
