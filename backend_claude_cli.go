@@ -45,6 +45,12 @@ func newClaudeCLIBackend(config cliBackendConfig) *claudeCLIBackend {
 	}
 }
 
+// These flags target the non-interactive `claude -p` contract described in
+// SPEC.md (JSON output, no session persistence, safe mode, tools disabled).
+// Default tests inject a fake runner and cannot catch a renamed or removed
+// flag, so the opt-in `go test -tags integration` smoke test in
+// backend_cli_integration_test.go launches the real binary to surface flag
+// drift against the installed `claude` version.
 func (b *claudeCLIBackend) generate(ctx context.Context, request Request) (*Response, error) {
 	args := []string{
 		"-p",

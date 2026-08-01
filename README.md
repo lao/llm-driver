@@ -142,3 +142,15 @@ go test ./...
 go test -race ./...
 go vet ./...
 ```
+
+The CLI flavors' flags (`claude -p --output-format json ...` and
+`codex exec --json ...`) cannot be validated by the offline suite because it
+injects a fake process runner. An opt-in smoke test launches the real binaries
+so a renamed or removed flag surfaces instead of failing only at runtime. It is
+excluded by default and skips when a binary or model is missing:
+
+```bash
+CLAUDEWRAP_CLAUDE_CLI_MODEL=claude-sonnet-4-5 \
+CLAUDEWRAP_CODEX_CLI_MODEL=gpt-5.6-sol \
+  go test -tags integration -run 'CLIIntegration' .
+```
