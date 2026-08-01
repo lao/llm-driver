@@ -19,8 +19,8 @@ import (
 // when the binary is missing or when the model environment variable is unset,
 // so opting in requires a working local login.
 //
-//	CLAUDEWRAP_CLAUDE_CLI_MODEL   model passed to `claude -p`
-//	CLAUDEWRAP_CODEX_CLI_MODEL    model passed to `codex exec`
+//	LLMWRAPPER_CLAUDE_CLI_MODEL   model passed to `claude -p`
+//	LLMWRAPPER_CODEX_CLI_MODEL    model passed to `codex exec`
 
 // unknownFlagMarkers are substrings the tested CLIs emit when they reject an
 // argument. They let the smoke tests report flag drift explicitly rather than
@@ -35,11 +35,11 @@ var unknownFlagMarkers = []string{
 }
 
 func TestClaudeCLIIntegration(t *testing.T) {
-	runCLIIntegrationSmoke(t, ProviderClaude, "claude", "CLAUDEWRAP_CLAUDE_CLI_MODEL")
+	runCLIIntegrationSmoke(t, ProviderClaude, "claude", "LLMWRAPPER_CLAUDE_CLI_MODEL")
 }
 
 func TestCodexCLIIntegration(t *testing.T) {
-	runCLIIntegrationSmoke(t, ProviderOpenAI, "codex", "CLAUDEWRAP_CODEX_CLI_MODEL")
+	runCLIIntegrationSmoke(t, ProviderOpenAI, "codex", "LLMWRAPPER_CODEX_CLI_MODEL")
 }
 
 func runCLIIntegrationSmoke(t *testing.T, provider Provider, binary, modelEnv string) {
