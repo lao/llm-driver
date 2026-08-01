@@ -180,7 +180,7 @@ and normalize terminal and process failures.
 
 **Acceptance criteria:**
 
-- [x] Tests assert `codex exec` non-interactive/read-only/ephemeral argv and the
+- [x] Tests assert `codex exec` non-interactive/read-only argv and the
       rendered request on stdin, including custom CLI configuration.
 - [x] Progress/reasoning events are ignored; the final agent message and
       cached/reasoning usage map with `ProviderOpenAI`/`FlavorCLI`.

@@ -86,8 +86,8 @@ never imports a provider SDK or exposes subprocess types.
 | --- | --- | --- |
 | Claude/API | Messages API system block, structured turns, `max_tokens`, configured model | Text blocks joined; message ID/model; neutral completion reason; input/output/cache usage |
 | OpenAI/API | Responses API instructions, structured input turns, `max_output_tokens`, configured model | Output text/refusal; response ID/model; neutral completion reason; input/output/cached/reasoning usage |
-| Claude/CLI | Prompt transcript on stdin; `-p --output-format json --model`; system via CLI flag; no session persistence | JSON result/session ID/usage; non-success subtype becomes normalized error |
-| OpenAI/CLI | Transcript on stdin; system via per-invocation `developer_instructions`; `codex exec --json --ephemeral --sandbox read-only --model ... -` | Final completed agent-message item; turn-completed usage; failed/error events become normalized errors |
+| Claude/CLI | Prompt transcript on stdin; `-p --output-format json --permission-mode default --model`; system via CLI flag; single-shot print mode | JSON result/session ID/usage; non-success subtype becomes normalized error |
+| OpenAI/CLI | Transcript on stdin; system via per-invocation `developer_instructions`; `codex exec --json --sandbox read-only --skip-git-repo-check --model ... -` | Final completed agent-message item; turn-completed usage; failed/error events become normalized errors |
 
 CLI `MaxTokens` has no reliable equivalent and is accepted but not translated.
 This limitation is documented, not silently presented as exact parity.
@@ -338,7 +338,7 @@ command must match the single declaration in `go.mod`.
 | OpenAI SDK Responses unions are easy to map incorrectly | High | Pin Go-1.24-compatible v3.44.0, inspect actual types with `go doc`, and assert captured wire JSON through `httptest` |
 | SDK base-URL semantics differ | Medium | Give each adapter its own test-server setup and assert request path/method |
 | CLI output schemas drift between installed versions | High | Parse only documented fields/events, ignore unknown JSON fields, and cover malformed/missing terminal events |
-| CLI tools are agentic, unlike hosted text endpoints | Medium | Use non-interactive/ephemeral modes, read-only Codex sandbox, stdin prompts, and explicit README limitations |
+| CLI tools are agentic, unlike hosted text endpoints | Medium | Use non-interactive single-shot modes, read-only Codex sandbox, stdin prompts, and explicit README limitations |
 | Usage fields do not align one-to-one | Medium | Keep a small superset of neutral counters and leave unavailable counters zero |
 | CLI max tokens cannot be enforced consistently | Low | Accept the shared request, document the limitation, and never claim exact transport parity |
 | Package and module names intentionally differ until repository rename | Medium | Keep the fetchable `github.com/lao/claudewrap` module path in code/docs and distinguish it from package `llmwrapper` in verification |

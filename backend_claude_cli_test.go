@@ -26,7 +26,7 @@ func TestClaudeCLICommand(t *testing.T) {
 			},
 			request:    Request{MaxTokens: 32, Messages: []Message{User("Hello from stdin")}},
 			wantPath:   "claude",
-			wantArgs:   []string{"-p", "--output-format", "json", "--no-session-persistence", "--safe-mode", "--tools", "", "--model", "claude-test"},
+			wantArgs:   []string{"-p", "--output-format", "json", "--permission-mode", "default", "--model", "claude-test"},
 			wantPrompt: "Hello from stdin",
 		},
 		{
@@ -45,7 +45,7 @@ func TestClaudeCLICommand(t *testing.T) {
 			},
 			wantPath: "/opt/bin/claude-custom",
 			wantArgs: []string{
-				"-p", "--output-format", "json", "--no-session-persistence", "--safe-mode", "--tools", "", "--model", "claude-test",
+				"-p", "--output-format", "json", "--permission-mode", "default", "--model", "claude-test",
 				"--append-system-prompt", "Be concise.",
 				"--permission-mode", "plan",
 			},

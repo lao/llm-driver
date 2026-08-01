@@ -26,7 +26,7 @@ func TestCodexCLICommand(t *testing.T) {
 			},
 			request:    Request{MaxTokens: 32, Messages: []Message{User("Hello from stdin")}},
 			wantPath:   "codex",
-			wantArgs:   []string{"exec", "--json", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "--model", "gpt-test", "-"},
+			wantArgs:   []string{"exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", "--model", "gpt-test", "-"},
 			wantPrompt: "Hello from stdin",
 		},
 		{
@@ -45,7 +45,7 @@ func TestCodexCLICommand(t *testing.T) {
 			},
 			wantPath: "/opt/bin/codex-custom",
 			wantArgs: []string{
-				"exec", "--json", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "--model", "gpt-test",
+				"exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", "--model", "gpt-test",
 				"--config", `developer_instructions="Be \"concise\".\nUse x = y."`,
 				"--color", "never", "-",
 			},

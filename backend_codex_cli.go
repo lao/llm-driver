@@ -57,16 +57,15 @@ func newCodexCLIBackend(config cliBackendConfig) *codexCLIBackend {
 }
 
 // These flags target the non-interactive `codex exec` contract described in
-// SPEC.md (JSONL output, ephemeral run, read-only sandbox, no git-repo check).
-// Default tests inject a fake runner and cannot catch a renamed or removed
-// flag, so the opt-in `go test -tags integration` smoke test in
+// SPEC.md (JSONL output, read-only sandbox, no git-repo check). Default tests
+// inject a fake runner and cannot catch a renamed or removed flag, so the
+// opt-in `go test -tags integration` smoke test in
 // backend_cli_integration_test.go launches the real binary to surface flag
 // drift against the installed `codex` version.
 func (b *codexCLIBackend) generate(ctx context.Context, request Request) (*Response, error) {
 	args := []string{
 		"exec",
 		"--json",
-		"--ephemeral",
 		"--sandbox", "read-only",
 		"--skip-git-repo-check",
 		"--model", b.model,
