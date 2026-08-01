@@ -1,127 +1,205 @@
-package claudewrap
+package llmwrapper
 
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
-// fakeRun records the invocation and returns canned output.
-type fakeRun struct {
-	gotName  string
-	gotArgs  []string
-	gotStdin []byte
-
-	stdout []byte
-	stderr []byte
-	exit   int
-	err    error
+type fakeCommandRunner struct {
+	name     string
+	args     []string
+	stdin    []byte
+	stdout   []byte
+	stderr   []byte
+	exitCode int
+	err      error
+	calls    int
 }
 
-func (f *fakeRun) run(_ context.Context, name string, args []string, stdin []byte) ([]byte, []byte, int, error) {
-	f.gotName, f.gotArgs, f.gotStdin = name, args, stdin
-	return f.stdout, f.stderr, f.exit, f.err
+func (r *fakeCommandRunner) run(_ context.Context, name string, args []string, stdin []byte) ([]byte, []byte, int, error) {
+	r.calls++
+	r.name = name
+	r.args = append([]string(nil), args...)
+	r.stdin = append([]byte(nil), stdin...)
+	return r.stdout, r.stderr, r.exitCode, r.err
 }
 
-const okCLIBody = `{"type":"result","subtype":"success","is_error":false,` +
-	`"result":"ok","stop_reason":"end_turn","session_id":"sess_1",` +
-	`"usage":{"input_tokens":10,"output_tokens":188,"cache_read_input_tokens":0,"cache_creation_input_tokens":33332}}`
-
-func TestCLIMessagesNew(t *testing.T) {
-	f := &fakeRun{stdout: []byte(okCLIBody)}
-	c, err := New(WithCLI(WithCLIPath("claude"), withCLIRunner(f.run)))
-	if err != nil {
-		t.Fatalf("New: %v", err)
+func (r *fakeCommandRunner) assertCall(t *testing.T, name string, args []string, stdin string) {
+	t.Helper()
+	if r.calls != 1 {
+		t.Fatalf("runner calls = %d, want 1", r.calls)
 	}
+	if r.name != name {
+		t.Fatalf("executable = %q, want %q", r.name, name)
+	}
+	if !slices.Equal(r.args, args) {
+		t.Fatalf("args = %#v, want %#v", r.args, args)
+	}
+	if string(r.stdin) != stdin {
+		t.Fatalf("stdin = %q, want %q", r.stdin, stdin)
+	}
+}
 
-	resp, err := c.Messages.New(context.Background(), MessageParams{
-		MaxTokens: 64,
-		Messages:  []Message{UserMessage("hi")},
+func TestPromptRenderSingleUser(t *testing.T) {
+	t.Parallel()
+
+	got := renderTranscript([]Message{User("Hello from stdin")})
+	if got != "Hello from stdin" {
+		t.Fatalf("renderTranscript() = %q", got)
+	}
+}
+
+func TestPromptRenderMultiTurn(t *testing.T) {
+	t.Parallel()
+
+	got := renderTranscript([]Message{
+		User("First question"),
+		Assistant("First answer"),
+		User("Follow-up"),
 	})
-	if err != nil {
-		t.Fatalf("Messages.New: %v", err)
+	want := "User: First question\n\nAssistant: First answer\n\nUser: Follow-up"
+	if got != want {
+		t.Fatalf("renderTranscript() = %q, want %q", got, want)
 	}
-	if resp.Text() != "ok" {
-		t.Errorf("Text() = %q", resp.Text())
+}
+
+func TestCommandMissingExecutable(t *testing.T) {
+	t.Parallel()
+
+	_, _, _, err := defaultCommandRunner(
+		context.Background(),
+		"llmwrapper-command-that-does-not-exist",
+		nil,
+		nil,
+	)
+	if !errors.Is(err, ErrExecutableNotFound) {
+		t.Fatalf("defaultCommandRunner() error = %v, want ErrExecutableNotFound", err)
 	}
-	if resp.Backend != "cli" {
-		t.Errorf("Backend = %q, want cli", resp.Backend)
+}
+
+func TestCommandPreservesDeadline(t *testing.T) {
+	t.Setenv("LLMWRAPPER_HELPER_PROCESS", "sleep")
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, _, _, err := defaultCommandRunner(
+		ctx,
+		os.Args[0],
+		[]string{"-test.run=^TestCommandHelperProcess$"},
+		nil,
+	)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("defaultCommandRunner() error = %v, want context deadline", err)
 	}
-	if resp.StopReason != StopEndTurn {
-		t.Errorf("StopReason = %q", resp.StopReason)
+}
+
+func TestCommandCancellationDoesNotWaitForDescendant(t *testing.T) {
+	readyPath := filepath.Join(t.TempDir(), "ready")
+	t.Setenv("LLMWRAPPER_HELPER_PROCESS", "parent")
+	t.Setenv("LLMWRAPPER_HELPER_READY", readyPath)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, _, _, err := defaultCommandRunner(
+			ctx,
+			os.Args[0],
+			[]string{"-test.run=^TestCommandHelperProcess$"},
+			nil,
+		)
+		result <- err
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(readyPath); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("os.Stat(%q): %v", readyPath, err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("descendant process did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	if resp.Usage.InputTokens != 10 || resp.Usage.OutputTokens != 188 || resp.Usage.CacheCreationTokens != 33332 {
-		t.Errorf("Usage = %+v", resp.Usage)
-	}
-	// Prompt goes on stdin (injection-safe), not as a shell string.
-	if string(f.gotStdin) != "hi" {
-		t.Errorf("stdin = %q, want hi", f.gotStdin)
-	}
-	for _, want := range [][2]string{{"-p", ""}, {"--output-format", "json"}, {"--model", DefaultModel}} {
-		if !argPresent(f.gotArgs, want[0], want[1]) {
-			t.Errorf("args %v missing %q %q", f.gotArgs, want[0], want[1])
+
+	cancel()
+	var err error
+	select {
+	case err = <-result:
+	case <-time.After(time.Second):
+		select {
+		case err = <-result:
+			t.Error("defaultCommandRunner() waited for descendant stdio after cancellation")
+		case <-time.After(4 * time.Second):
+			t.Fatal("defaultCommandRunner() did not return after descendant exited")
 		}
 	}
-}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("defaultCommandRunner() error = %v, want context.Canceled", err)
+	}
 
-func TestCLISystemPrompt(t *testing.T) {
-	f := &fakeRun{stdout: []byte(okCLIBody)}
-	c, _ := New(WithCLI(withCLIRunner(f.run)))
-	_, err := c.Messages.New(context.Background(), MessageParams{
-		MaxTokens: 16, System: "be terse",
-		Messages: []Message{UserMessage("hi")},
-	})
-	if err != nil {
-		t.Fatalf("Messages.New: %v", err)
+	pidBytes, readErr := os.ReadFile(readyPath)
+	if readErr != nil {
+		t.Fatalf("read descendant pid: %v", readErr)
 	}
-	if !argPresent(f.gotArgs, "--append-system-prompt", "be terse") {
-		t.Errorf("args %v missing system prompt", f.gotArgs)
+	descendant, convErr := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+	if convErr != nil {
+		t.Fatalf("parse descendant pid %q: %v", pidBytes, convErr)
 	}
-}
-
-func TestCLIExitError(t *testing.T) {
-	f := &fakeRun{exit: 1, stderr: []byte("boom")}
-	c, _ := New(WithCLI(withCLIRunner(f.run)))
-	_, err := c.Messages.New(context.Background(), MessageParams{MaxTokens: 16, Messages: []Message{UserMessage("hi")}})
-	var e *Error
-	if !errors.As(err, &e) {
-		t.Fatalf("err = %T, want *Error", err)
-	}
-	if e.Backend != "cli" || e.Status != 1 {
-		t.Errorf("err = %+v, want cli/1", e)
+	exitDeadline := time.Now().Add(5 * time.Second)
+	for descendantAlive(descendant) {
+		if time.Now().After(exitDeadline) {
+			t.Fatalf("descendant process %d survived cancellation", descendant)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
-func TestCLIBadJSON(t *testing.T) {
-	f := &fakeRun{stdout: []byte("not json")}
-	c, _ := New(WithCLI(withCLIRunner(f.run)))
-	_, err := c.Messages.New(context.Background(), MessageParams{MaxTokens: 16, Messages: []Message{UserMessage("hi")}})
-	var e *Error
-	if !errors.As(err, &e) {
-		t.Fatalf("err = %T, want *Error", err)
+func TestCommandHelperProcess(t *testing.T) {
+	if os.Getenv("LLMWRAPPER_HELPER_DESCENDANT") == "1" {
+		time.Sleep(30 * time.Second)
+		return
+	}
+
+	switch os.Getenv("LLMWRAPPER_HELPER_PROCESS") {
+	case "":
+		return
+	case "parent":
+		child := exec.Command(os.Args[0], "-test.run=^TestCommandHelperProcess$")
+		child.Env = append(os.Environ(), "LLMWRAPPER_HELPER_DESCENDANT=1")
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
+		if err := child.Start(); err != nil {
+			t.Fatalf("start descendant: %v", err)
+		}
+		if err := os.WriteFile(os.Getenv("LLMWRAPPER_HELPER_READY"), []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
+			t.Fatalf("write ready file: %v", err)
+		}
+	}
+
+	for {
+		time.Sleep(time.Hour)
 	}
 }
 
-func TestCLINotFound(t *testing.T) {
-	f := &fakeRun{err: exec.ErrNotFound}
-	c, _ := New(WithCLI(withCLIRunner(f.run)))
-	_, err := c.Messages.New(context.Background(), MessageParams{MaxTokens: 16, Messages: []Message{UserMessage("hi")}})
-	if !errors.Is(err, ErrCLINotFound) {
-		t.Fatalf("err = %v, want ErrCLINotFound", err)
-	}
-}
+func TestCommandOutputIsBounded(t *testing.T) {
+	t.Parallel()
 
-// argPresent reports whether flag appears in args, optionally followed by value
-// (value "" means the flag is a bare switch).
-func argPresent(args []string, flag, value string) bool {
-	i := slices.Index(args, flag)
-	if i < 0 {
-		return false
+	buffer := newBoundedBuffer(4)
+	written, err := buffer.Write([]byte("123456"))
+	if written != 4 || !errors.Is(err, errCLIOutputTooLarge) {
+		t.Fatalf("Write() = %d, %v", written, err)
 	}
-	if value == "" {
-		return true
+	if got := string(buffer.Bytes()); got != "1234" {
+		t.Fatalf("buffer = %q", got)
 	}
-	return i+1 < len(args) && args[i+1] == value
 }
