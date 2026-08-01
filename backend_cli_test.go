@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -144,11 +146,27 @@ func TestCommandCancellationDoesNotWaitForDescendant(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("defaultCommandRunner() error = %v, want context.Canceled", err)
 	}
+
+	pidBytes, readErr := os.ReadFile(readyPath)
+	if readErr != nil {
+		t.Fatalf("read descendant pid: %v", readErr)
+	}
+	descendant, convErr := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+	if convErr != nil {
+		t.Fatalf("parse descendant pid %q: %v", pidBytes, convErr)
+	}
+	exitDeadline := time.Now().Add(5 * time.Second)
+	for descendantAlive(descendant) {
+		if time.Now().After(exitDeadline) {
+			t.Fatalf("descendant process %d survived cancellation", descendant)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestCommandHelperProcess(t *testing.T) {
 	if os.Getenv("LLMWRAPPER_HELPER_DESCENDANT") == "1" {
-		time.Sleep(3 * time.Second)
+		time.Sleep(30 * time.Second)
 		return
 	}
 
@@ -163,7 +181,7 @@ func TestCommandHelperProcess(t *testing.T) {
 		if err := child.Start(); err != nil {
 			t.Fatalf("start descendant: %v", err)
 		}
-		if err := os.WriteFile(os.Getenv("LLMWRAPPER_HELPER_READY"), nil, 0o600); err != nil {
+		if err := os.WriteFile(os.Getenv("LLMWRAPPER_HELPER_READY"), []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
 			t.Fatalf("write ready file: %v", err)
 		}
 	}

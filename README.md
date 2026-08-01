@@ -118,9 +118,9 @@ the hosted APIs:
 
 - API flavors map and enforce `MaxTokens`. CLI flavors validate it as part of
   the portable request but have no reliable equivalent flag.
-- Claude CLI runs without session persistence. Codex runs ephemerally with a
-  read-only sandbox. Agent CLI behavior can still differ from a hosted model
-  endpoint.
+- Claude CLI runs without session persistence and in safe mode with agent
+  tools disabled. Codex runs ephemerally with a read-only sandbox. Agent CLI
+  behavior can still differ from a hosted model endpoint.
 - System text is passed through Claude's system-prompt flag and Codex's
   per-invocation developer-instructions setting. Conversation text stays on
   stdin. System text may therefore be visible to local process inspection.

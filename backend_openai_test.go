@@ -89,7 +89,7 @@ func TestOpenAIGenerateMapsRequestAndResponse(t *testing.T) {
   }],
   "usage":{
     "input_tokens":10,
-    "input_tokens_details":{"cached_tokens":3},
+    "input_tokens_details":{"cached_tokens":3,"cache_write_tokens":4},
     "output_tokens":7,
     "output_tokens_details":{"reasoning_tokens":2},
     "total_tokens":17
@@ -139,6 +139,13 @@ func TestOpenAIGenerateMapsRequestAndResponse(t *testing.T) {
 		if message["role"] != string(want.Role) || content["text"] != want.Text {
 			t.Errorf("input[%d] = %#v", i, message)
 		}
+		wantPhase := ""
+		if want.Role == RoleAssistant {
+			wantPhase = "final_answer"
+		}
+		if phase, _ := message["phase"].(string); phase != wantPhase {
+			t.Errorf("input[%d] phase = %q, want %q", i, phase, wantPhase)
+		}
 	}
 
 	if result.ID != "resp_123" || result.Model != "gpt-test" || result.Text != "Hello, world" {
@@ -150,7 +157,7 @@ func TestOpenAIGenerateMapsRequestAndResponse(t *testing.T) {
 	if result.Provider != ProviderOpenAI || result.Flavor != FlavorAPI {
 		t.Fatalf("response target = %s/%s", result.Provider, result.Flavor)
 	}
-	wantUsage := Usage{InputTokens: 10, OutputTokens: 7, CachedInputTokens: 3, ReasoningTokens: 2}
+	wantUsage := Usage{InputTokens: 10, OutputTokens: 7, CachedInputTokens: 3, CacheCreationInputTokens: 4, ReasoningTokens: 2}
 	if result.Usage != wantUsage {
 		t.Fatalf("usage = %+v, want %+v", result.Usage, wantUsage)
 	}

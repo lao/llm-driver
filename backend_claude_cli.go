@@ -50,6 +50,8 @@ func (b *claudeCLIBackend) generate(ctx context.Context, request Request) (*Resp
 		"-p",
 		"--output-format", "json",
 		"--no-session-persistence",
+		"--safe-mode",
+		"--tools", "",
 		"--model", b.model,
 	}
 	if request.System != "" {

@@ -38,10 +38,16 @@ func (b *openAIBackend) generate(ctx context.Context, request Request) (*Respons
 		content := responses.ResponseInputMessageContentListParam{
 			responses.ResponseInputContentParamOfInputText(message.Text),
 		}
-		input = append(input, responses.ResponseInputItemParamOfMessage(
+		item := responses.ResponseInputItemParamOfMessage(
 			content,
 			responses.EasyInputMessageRole(message.Role),
-		))
+		)
+		if message.Role == RoleAssistant {
+			// Preserve the completed-answer phase so current Codex models keep
+			// full follow-up quality on prior assistant turns.
+			item.OfMessage.Phase = responses.EasyInputMessagePhaseFinalAnswer
+		}
+		input = append(input, item)
 	}
 
 	params := responses.ResponseNewParams{
@@ -68,10 +74,11 @@ func (b *openAIBackend) generate(ctx context.Context, request Request) (*Respons
 		Text:             openAIResponseText(response),
 		CompletionReason: openAICompletionReason(response),
 		Usage: Usage{
-			InputTokens:       int(response.Usage.InputTokens),
-			OutputTokens:      int(response.Usage.OutputTokens),
-			CachedInputTokens: int(response.Usage.InputTokensDetails.CachedTokens),
-			ReasoningTokens:   int(response.Usage.OutputTokensDetails.ReasoningTokens),
+			InputTokens:              int(response.Usage.InputTokens),
+			OutputTokens:             int(response.Usage.OutputTokens),
+			CachedInputTokens:        int(response.Usage.InputTokensDetails.CachedTokens),
+			CacheCreationInputTokens: int(response.Usage.InputTokensDetails.CacheWriteTokens),
+			ReasoningTokens:          int(response.Usage.OutputTokensDetails.ReasoningTokens),
 		},
 	}, nil
 }

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/lao/claudewrap"
 )
@@ -20,7 +22,9 @@ type parsedOptions struct {
 }
 
 func main() {
-	os.Exit(exitCode(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	os.Exit(exitCode(ctx, os.Args[1:], os.Stdout, os.Stderr))
 }
 
 func exitCode(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) int {
