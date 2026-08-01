@@ -1,4 +1,4 @@
-package llmwrapper
+package backends
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 type anthropicBackend struct {
@@ -32,7 +34,7 @@ func newAnthropicBackend(config apiBackendConfig) *anthropicBackend {
 	}
 }
 
-func (b *anthropicBackend) generate(ctx context.Context, request Request) (*Response, error) {
+func (b *anthropicBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(b.model),
 		MaxTokens: int64(request.MaxTokens),
@@ -43,7 +45,7 @@ func (b *anthropicBackend) generate(ctx context.Context, request Request) (*Resp
 	}
 	for _, message := range request.Messages {
 		block := anthropic.NewTextBlock(message.Text)
-		if message.Role == RoleAssistant {
+		if message.Role == core.RoleAssistant {
 			params.Messages = append(params.Messages, anthropic.NewAssistantMessage(block))
 		} else {
 			params.Messages = append(params.Messages, anthropic.NewUserMessage(block))
@@ -61,12 +63,12 @@ func (b *anthropicBackend) generate(ctx context.Context, request Request) (*Resp
 			text.WriteString(block.Text)
 		}
 	}
-	return &Response{
+	return &core.Response{
 		ID:               message.ID,
 		Model:            string(message.Model),
 		Text:             text.String(),
 		CompletionReason: normalizeAnthropicCompletionReason(message.StopReason),
-		Usage: Usage{
+		Usage: core.Usage{
 			InputTokens:              int(message.Usage.InputTokens),
 			OutputTokens:             int(message.Usage.OutputTokens),
 			CachedInputTokens:        int(message.Usage.CacheReadInputTokens),
@@ -76,9 +78,9 @@ func (b *anthropicBackend) generate(ctx context.Context, request Request) (*Resp
 }
 
 func normalizeAnthropicError(err error) error {
-	normalized := &Error{
-		Provider:  ProviderClaude,
-		Flavor:    FlavorAPI,
+	normalized := &core.Error{
+		Provider:  core.ProviderClaude,
+		Flavor:    core.FlavorAPI,
 		Operation: "generate",
 		Err:       err,
 	}
@@ -98,14 +100,14 @@ func normalizeAnthropicError(err error) error {
 	return normalized
 }
 
-func normalizeAnthropicCompletionReason(reason anthropic.StopReason) CompletionReason {
+func normalizeAnthropicCompletionReason(reason anthropic.StopReason) core.CompletionReason {
 	switch reason {
 	case anthropic.StopReasonEndTurn, anthropic.StopReasonStopSequence:
-		return CompletionReasonStop
+		return core.CompletionReasonStop
 	case anthropic.StopReasonMaxTokens:
-		return CompletionReasonMaxTokens
+		return core.CompletionReasonMaxTokens
 	case anthropic.StopReasonRefusal:
-		return CompletionReasonRefusal
+		return core.CompletionReasonRefusal
 	default:
 		return ""
 	}

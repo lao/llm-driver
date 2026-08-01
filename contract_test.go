@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 func TestContractGenerateAcrossFourTargets(t *testing.T) {
@@ -101,7 +103,7 @@ func TestContractTargetMatrix(t *testing.T) {
 	}
 }
 
-func newContractTarget(t *testing.T, provider Provider, flavor Flavor) (Config, commandRunner, func() int) {
+func newContractTarget(t *testing.T, provider Provider, flavor Flavor) (Config, core.CommandRunner, func() int) {
 	t.Helper()
 
 	config := Config{Provider: provider, Flavor: flavor, Model: "contract-model"}

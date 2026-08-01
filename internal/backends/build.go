@@ -1,13 +1,10 @@
-package llmwrapper
+package backends
 
 import (
-	"context"
 	"net/http"
-)
 
-type backend interface {
-	generate(context.Context, Request) (*Response, error)
-}
+	"github.com/lao/llmwrapper/internal/core"
+)
 
 type apiBackendConfig struct {
 	model      string
@@ -20,10 +17,12 @@ type cliBackendConfig struct {
 	model  string
 	path   string
 	args   []string
-	runner commandRunner
+	runner core.CommandRunner
 }
 
-func buildBackend(config Config, runner commandRunner) (backend, error) {
+// New builds the backend selected by the config. A nil runner selects the
+// default CLI command runner for CLI flavors.
+func New(config core.Config, runner core.CommandRunner) (core.Backend, error) {
 	apiConfig := apiBackendConfig{
 		model:      config.Model,
 		apiKey:     config.APIKey,
@@ -38,20 +37,20 @@ func buildBackend(config Config, runner commandRunner) (backend, error) {
 	}
 
 	switch {
-	case config.Provider == ProviderClaude && config.Flavor == FlavorAPI:
+	case config.Provider == core.ProviderClaude && config.Flavor == core.FlavorAPI:
 		return newAnthropicBackend(apiConfig), nil
-	case config.Provider == ProviderClaude && config.Flavor == FlavorCLI:
+	case config.Provider == core.ProviderClaude && config.Flavor == core.FlavorCLI:
 		return newClaudeCLIBackend(cliConfig), nil
-	case config.Provider == ProviderOpenAI && config.Flavor == FlavorAPI:
+	case config.Provider == core.ProviderOpenAI && config.Flavor == core.FlavorAPI:
 		return newOpenAIBackend(apiConfig), nil
-	case config.Provider == ProviderOpenAI && config.Flavor == FlavorCLI:
+	case config.Provider == core.ProviderOpenAI && config.Flavor == core.FlavorCLI:
 		return newCodexCLIBackend(cliConfig), nil
 	default:
-		return nil, &Error{
+		return nil, &core.Error{
 			Provider:  config.Provider,
 			Flavor:    config.Flavor,
 			Operation: "client.new",
-			Err:       ErrInvalidConfig,
+			Err:       core.ErrInvalidConfig,
 		}
 	}
 }

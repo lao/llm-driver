@@ -1,4 +1,4 @@
-package llmwrapper
+package backends
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 type openAIBackend struct {
@@ -32,7 +34,7 @@ func newOpenAIBackend(config apiBackendConfig) *openAIBackend {
 	}
 }
 
-func (b *openAIBackend) generate(ctx context.Context, request Request) (*Response, error) {
+func (b *openAIBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
 	input := make(responses.ResponseInputParam, 0, len(request.Messages))
 	for _, message := range request.Messages {
 		content := responses.ResponseInputMessageContentListParam{
@@ -42,7 +44,7 @@ func (b *openAIBackend) generate(ctx context.Context, request Request) (*Respons
 			content,
 			responses.EasyInputMessageRole(message.Role),
 		)
-		if message.Role == RoleAssistant {
+		if message.Role == core.RoleAssistant {
 			// Preserve the completed-answer phase so current Codex models keep
 			// full follow-up quality on prior assistant turns.
 			item.OfMessage.Phase = responses.EasyInputMessagePhaseFinalAnswer
@@ -68,12 +70,12 @@ func (b *openAIBackend) generate(ctx context.Context, request Request) (*Respons
 	if err := validateOpenAIResponse(response); err != nil {
 		return nil, err
 	}
-	return &Response{
+	return &core.Response{
 		ID:               response.ID,
 		Model:            string(response.Model),
 		Text:             openAIResponseText(response),
 		CompletionReason: openAICompletionReason(response),
-		Usage: Usage{
+		Usage: core.Usage{
 			InputTokens:              int(response.Usage.InputTokens),
 			OutputTokens:             int(response.Usage.OutputTokens),
 			CachedInputTokens:        int(response.Usage.InputTokensDetails.CachedTokens),
@@ -102,9 +104,9 @@ func validateOpenAIResponse(response *responses.Response) error {
 		if code == "" {
 			code = "unknown_status"
 		}
-		return &Error{
-			Provider:  ProviderOpenAI,
-			Flavor:    FlavorAPI,
+		return &core.Error{
+			Provider:  core.ProviderOpenAI,
+			Flavor:    core.FlavorAPI,
 			Operation: "generate",
 			Code:      code,
 			Message:   message,
@@ -129,25 +131,25 @@ func openAIResponseText(response *responses.Response) string {
 	return text.String()
 }
 
-func openAICompletionReason(response *responses.Response) CompletionReason {
+func openAICompletionReason(response *responses.Response) core.CompletionReason {
 	if response.Status == responses.ResponseStatusIncomplete &&
 		response.IncompleteDetails.Reason == "max_output_tokens" {
-		return CompletionReasonMaxTokens
+		return core.CompletionReasonMaxTokens
 	}
 	for _, item := range response.Output {
 		for _, content := range item.Content {
 			if content.Type == "refusal" {
-				return CompletionReasonRefusal
+				return core.CompletionReasonRefusal
 			}
 		}
 	}
-	return CompletionReasonStop
+	return core.CompletionReasonStop
 }
 
 func normalizeOpenAIError(err error) error {
-	normalized := &Error{
-		Provider:  ProviderOpenAI,
-		Flavor:    FlavorAPI,
+	normalized := &core.Error{
+		Provider:  core.ProviderOpenAI,
+		Flavor:    core.FlavorAPI,
 		Operation: "generate",
 		Err:       err,
 	}
