@@ -17,8 +17,8 @@ authenticated CLI and later use the corresponding hosted API—or switch
 providers—without changing application call sites. Only the `Config` values for
 provider, flavor, credentials, and model should change.
 
-This is a clean package rename. The module path is
-`github.com/lao/llmwrapper`, matching the renamed repository; no compatibility
+This is a clean package rename. The committed module path remains
+`github.com/lao/claudewrap`, matching the existing repository; no compatibility
 package or deprecated aliases for the former package are included.
 
 ### Public API
@@ -295,7 +295,7 @@ substitute for the cases above.
 
 ## Success Criteria
 
-- The module path is `github.com/lao/llmwrapper`, the root package is
+- The module path is `github.com/lao/claudewrap`, the root package is
   `llmwrapper`, docs/examples use the fetchable import path, and no active code
   declares the former package name.
 - `New(Config)` accepts exactly the four documented provider/flavor pairs and
@@ -319,5 +319,5 @@ substitute for the cases above.
 ## Open Questions
 
 None. The four-target matrix and clean-break API were approved on 2026-07-31.
-The module path is `github.com/lao/llmwrapper`, matching the GitHub repository
+The module path is `github.com/lao/claudewrap`, matching the GitHub repository
 name so external consumers can fetch it.

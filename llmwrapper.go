@@ -1,6 +1,6 @@
 package llmwrapper
 
-import "github.com/lao/llmwrapper/internal/core"
+import "github.com/lao/claudewrap/internal/core"
 
 // The package's data types live in internal/core so backend implementations
 // can share them without an import cycle. These aliases keep the public API

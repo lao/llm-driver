@@ -3,7 +3,7 @@ package backends
 import (
 	"net/http"
 
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/claudewrap/internal/core"
 )
 
 type apiBackendConfig struct {

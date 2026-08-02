@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/claudewrap/internal/core"
 )
 
 func TestPromptRenderSingleUser(t *testing.T) {

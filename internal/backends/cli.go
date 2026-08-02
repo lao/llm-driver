@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/claudewrap/internal/core"
 )
 
 const (

@@ -3,8 +3,8 @@ package llmwrapper
 import (
 	"context"
 
-	"github.com/lao/llmwrapper/internal/backends"
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/claudewrap/internal/backends"
+	"github.com/lao/claudewrap/internal/core"
 )
 
 // Client sends provider-neutral generation requests through one configured

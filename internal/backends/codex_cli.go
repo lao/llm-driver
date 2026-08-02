@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/claudewrap/internal/core"
 )
 
 const maxCodexEventSize = 16 << 20
