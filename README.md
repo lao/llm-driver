@@ -30,7 +30,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/lao/claudewrap"
+	llmwrapper "github.com/lao/claudewrap"
 )
 
 func main() {
