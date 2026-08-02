@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lao/claudewrap/internal/core"
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 type claudeCLIBackend struct {
@@ -51,9 +51,9 @@ func newClaudeCLIBackend(config cliBackendConfig) *claudeCLIBackend {
 // docs/SPEC.md. Print mode is already single-shot and non-persistent, and the
 // default permission mode keeps a headless run from approving agent tool
 // actions. Default tests inject a fake runner and cannot catch a renamed or
-// removed flag, so the opt-in `go test -tags integration` smoke test in
-// cli_integration_test.go launches the real binary to surface flag
-// drift against the installed `claude` version.
+// removed flag, so the opt-in `go test -tags integration` smoke test in the
+// root package's cli_integration_test.go launches the real binary to surface
+// flag drift against the installed `claude` version.
 func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
 	args := []string{
 		"-p",

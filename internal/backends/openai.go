@@ -9,7 +9,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
 
-	"github.com/lao/claudewrap/internal/core"
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 type openAIBackend struct {

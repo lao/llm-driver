@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/lao/claudewrap/internal/core"
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 func TestContractGenerateAcrossFourTargets(t *testing.T) {

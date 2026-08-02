@@ -11,7 +11,7 @@ import (
 	"strings"
 	"syscall"
 
-	llmwrapper "github.com/lao/claudewrap"
+	llmwrapper "github.com/lao/llmwrapper"
 )
 
 const defaultMaxTokens = 1024
