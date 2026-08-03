@@ -301,3 +301,66 @@ func TestClaudeCLIStreamCloseTerminatesRunner(t *testing.T) {
 		t.Fatal("Next() = true after Close()")
 	}
 }
+
+func TestClaudeCLIStreamMalformedResultLine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		result      string
+		wantCode    string
+		wantMessage string
+		wantDecode  bool
+	}{
+		{
+			// The envelope decodes but the result payload does not, so the failure
+			// has to come from the second decode rather than being silently ignored.
+			name:       "result payload with wrong field types",
+			result:     `{"type":"result","subtype":"success","usage":"none"}`,
+			wantDecode: true,
+		},
+		{
+			name:        "result without a subtype",
+			result:      `{"type":"result"}`,
+			wantCode:    "unsuccessful_result",
+			wantMessage: "Claude CLI returned an unsuccessful result",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			runner := &fakeStreamingRunner{lines: append(claudeStreamJSONLines()[:5], test.result)}
+			client := newCLIStreamClient(Config{
+				Provider: ProviderClaude,
+				Flavor:   FlavorCLI,
+				Model:    "claude-test",
+			}, runner.run)
+
+			stream, err := client.GenerateStream(context.Background(), streamRequest())
+			if err != nil {
+				t.Fatalf("GenerateStream(): %v", err)
+			}
+			defer stream.Close()
+
+			_, err, _ = collectStream(t, stream)
+			var target *Error
+			if !errors.As(err, &target) {
+				t.Fatalf("stream error = %T %v, want *Error", err, err)
+			}
+			if target.Provider != ProviderClaude || target.Flavor != FlavorCLI || target.Operation != "generate_stream" {
+				t.Fatalf("error context = %+v", target)
+			}
+			if target.Code != test.wantCode {
+				t.Fatalf("code = %q, want %q", target.Code, test.wantCode)
+			}
+			if test.wantMessage != "" && target.Message != test.wantMessage {
+				t.Fatalf("message = %q, want %q", target.Message, test.wantMessage)
+			}
+			if test.wantDecode && target.Err == nil {
+				t.Fatalf("error = %+v, want a wrapped decode failure", target)
+			}
+		})
+	}
+}

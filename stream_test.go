@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
@@ -77,6 +78,7 @@ type scriptedStream struct {
 
 	index    int
 	closes   int
+	finishes int
 	closeErr error
 	blocked  chan struct{}
 }
@@ -97,6 +99,7 @@ func (s *scriptedStream) recv() (Chunk, error) {
 }
 
 func (s *scriptedStream) finish() (*Response, error) {
+	s.finishes++
 	if s.finishErr != nil {
 		return nil, s.finishErr
 	}
@@ -437,5 +440,145 @@ func TestStreamCloseLeavesNoGoroutines(t *testing.T) {
 			t.Fatalf("goroutines = %d, baseline %d", runtime.NumGoroutine(), baseline)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// gatedStream parks inside recv until close releases it, so a test can pin down
+// what Next does with a chunk that only arrives after Close.
+type gatedStream struct {
+	entered  chan struct{}
+	released chan struct{}
+	late     Chunk
+
+	enterOnce   sync.Once
+	releaseOnce sync.Once
+}
+
+func (s *gatedStream) recv() (Chunk, error) {
+	s.enterOnce.Do(func() { close(s.entered) })
+	<-s.released
+	return s.late, nil
+}
+
+func (s *gatedStream) finish() (*Response, error) { return &Response{}, nil }
+
+func (s *gatedStream) close() error {
+	s.releaseOnce.Do(func() { close(s.released) })
+	return nil
+}
+
+func TestStreamCloseWhileBlockedInRecvDropsLateChunk(t *testing.T) {
+	t.Parallel()
+
+	source := &gatedStream{
+		entered:  make(chan struct{}),
+		released: make(chan struct{}),
+		late:     Chunk{Text: "arrived too late"},
+	}
+	client := newScriptedClient(t, source)
+	stream, err := client.GenerateStream(context.Background(), streamRequest())
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+
+	advanced := make(chan bool, 1)
+	go func() { advanced <- stream.Next() }()
+	<-source.entered // Next is now genuinely parked inside recv.
+
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close(): %v", err)
+	}
+	select {
+	case got := <-advanced:
+		if got {
+			t.Fatal("Next() = true for a chunk that arrived after Close()")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Next() did not return after Close()")
+	}
+	if text := stream.Current().Text; text != "" {
+		t.Fatalf("Current().Text = %q after Close(), want the late chunk to be dropped", text)
+	}
+	// Close is an abort, not a failure.
+	if stream.Err() != nil {
+		t.Fatalf("Err() = %v after Close(), want nil", stream.Err())
+	}
+}
+
+func TestStreamResponseIsStableAcrossCalls(t *testing.T) {
+	t.Parallel()
+
+	source := &scriptedStream{chunks: []string{"a", "b"}, response: &Response{ID: "resp-1"}}
+	client := newScriptedClient(t, source)
+	stream, err := client.GenerateStream(context.Background(), streamRequest())
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+
+	for stream.Next() {
+	}
+	first, err := stream.Response()
+	if err != nil {
+		t.Fatalf("Response(): %v", err)
+	}
+	second, err := stream.Response()
+	if err != nil {
+		t.Fatalf("second Response(): %v", err)
+	}
+	if first != second {
+		t.Fatalf("Response() returned a different response on the second call: %+v vs %+v", first, second)
+	}
+	if second.Text != "ab" {
+		t.Fatalf("Response().Text = %q on the second call, want the concatenated chunks once", second.Text)
+	}
+	// Re-running finish would re-consume a stateful adapter parser.
+	if source.finishes != 1 {
+		t.Fatalf("underlying finishes = %d, want 1", source.finishes)
+	}
+}
+
+func TestGenerateStreamRejectsNilStream(t *testing.T) {
+	t.Parallel()
+
+	client := newScriptedClient(t, nil)
+	stream, err := client.GenerateStream(context.Background(), streamRequest())
+	if stream != nil {
+		t.Fatal("GenerateStream() returned a stream for a nil backend stream")
+	}
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("GenerateStream() error = %T %v, want *Error", err, err)
+	}
+	if target.Operation != "generate_stream" || target.Message == "" {
+		t.Fatalf("error = %+v", target)
+	}
+}
+
+func TestStreamRejectsNilResponse(t *testing.T) {
+	t.Parallel()
+
+	client := newScriptedClient(t, &scriptedStream{chunks: []string{"a"}})
+	stream, err := client.GenerateStream(context.Background(), streamRequest())
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+
+	for stream.Next() {
+	}
+	response, err := stream.Response()
+	if response != nil {
+		t.Fatalf("Response() = %+v, want nil", response)
+	}
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("Response() error = %T %v, want *Error", err, err)
+	}
+	if target.Operation != "generate_stream" || target.Message == "" {
+		t.Fatalf("error = %+v", target)
+	}
+	if stream.Err() == nil {
+		t.Fatal("Err() = nil after Response() failed")
 	}
 }

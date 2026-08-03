@@ -236,3 +236,80 @@ func TestAnthropicStreamContextCancellation(t *testing.T) {
 		t.Fatalf("Err() = %v, want context.Canceled", stream.Err())
 	}
 }
+
+func TestAnthropicStreamTruncatedOutputIsAnError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		events []string
+	}{
+		// A 200 response whose body ends early looks like a clean EOF to the SDK,
+		// so the adapter — not the transport — has to notice the missing terminal
+		// event instead of reporting a partial answer as a complete one.
+		{name: "truncated after deltas", events: anthropicSSEEvents()[:4]},
+		{name: "no events at all", events: nil},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			client, _ := newAnthropicStreamClient(t, http.StatusOK, test.events)
+			stream, err := client.GenerateStream(context.Background(), Request{
+				MaxTokens: 64,
+				Messages:  []Message{User("hello")},
+			})
+			if err != nil {
+				t.Fatalf("GenerateStream(): %v", err)
+			}
+			defer stream.Close()
+
+			_, err, response := collectStream(t, stream)
+			if err == nil {
+				t.Fatalf("stream error = nil for a truncated stream, response = %+v", response)
+			}
+			var target *Error
+			if !errors.As(err, &target) {
+				t.Fatalf("stream error = %T %v, want *Error", err, err)
+			}
+			if target.Provider != ProviderClaude || target.Flavor != FlavorAPI || target.Operation != "generate_stream" {
+				t.Fatalf("error context = %+v", target)
+			}
+			if target.Code != "missing_message_completion" {
+				t.Fatalf("code = %q, want missing_message_completion", target.Code)
+			}
+		})
+	}
+}
+
+func TestAnthropicStreamOutOfOrderEvents(t *testing.T) {
+	t.Parallel()
+
+	// A text delta with no content block to attach to cannot be accumulated, so
+	// the adapter must fail instead of quietly dropping response text.
+	client, _ := newAnthropicStreamClient(t, http.StatusOK, []string{
+		anthropicSSEEvents()[0],
+		anthropicSSEEvents()[2],
+	})
+	stream, err := client.GenerateStream(context.Background(), Request{
+		MaxTokens: 64,
+		Messages:  []Message{User("hello")},
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+
+	chunks, err, response := collectStream(t, stream)
+	if err == nil {
+		t.Fatalf("stream error = nil for out-of-order events, chunks = %#v, response = %+v", chunks, response)
+	}
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("stream error = %T %v, want *Error", err, err)
+	}
+	if target.Provider != ProviderClaude || target.Flavor != FlavorAPI || target.Operation != "generate_stream" {
+		t.Fatalf("error context = %+v", target)
+	}
+}

@@ -287,3 +287,43 @@ func TestCodexCLIStreamErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexCLIStreamFailureWithoutMessage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		line     string
+		wantCode string
+	}{
+		{name: "turn failed", line: `{"type":"turn.failed"}`, wantCode: "turn_failed"},
+		{name: "error event", line: `{"type":"error"}`, wantCode: "error"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			runner := &fakeStreamingRunner{lines: []string{codexStreamThread, test.line}}
+			client := newCodexStreamClient(runner.run)
+			stream, err := client.GenerateStream(context.Background(), streamRequest())
+			if err != nil {
+				t.Fatalf("GenerateStream(): %v", err)
+			}
+			defer stream.Close()
+
+			_, err, _ = collectStream(t, stream)
+			var target *Error
+			if !errors.As(err, &target) {
+				t.Fatalf("stream error = %T %v, want *Error", err, err)
+			}
+			if target.Code != test.wantCode {
+				t.Fatalf("code = %q, want %q", target.Code, test.wantCode)
+			}
+			// A failure the CLI reports without text still has to explain itself.
+			if target.Message == "" {
+				t.Fatal("message is empty for a failure event without a message")
+			}
+		})
+	}
+}

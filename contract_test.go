@@ -387,3 +387,87 @@ func newContractFailingStreamTarget(t *testing.T, provider Provider, flavor Flav
 	}
 	return client
 }
+
+func TestContractStreamTruncatedOutputAcrossFourTargets(t *testing.T) {
+	t.Parallel()
+
+	targets := []struct {
+		provider Provider
+		flavor   Flavor
+	}{
+		{provider: ProviderClaude, flavor: FlavorAPI},
+		{provider: ProviderClaude, flavor: FlavorCLI},
+		{provider: ProviderOpenAI, flavor: FlavorAPI},
+		{provider: ProviderOpenAI, flavor: FlavorCLI},
+	}
+
+	for _, target := range targets {
+		t.Run(string(target.provider)+"/"+string(target.flavor), func(t *testing.T) {
+			t.Parallel()
+
+			client := newContractTruncatedStreamTarget(t, target.provider, target.flavor)
+			stream, err := client.GenerateStream(context.Background(), Request{
+				MaxTokens: 64,
+				Messages:  []Message{User("Hello")},
+			})
+			if err != nil {
+				t.Fatalf("GenerateStream(): %v", err)
+			}
+			defer stream.Close()
+
+			for stream.Next() {
+			}
+			// Output that stops before the target's terminal event is incomplete on
+			// every target, so no target may report it as a finished response.
+			err = stream.Err()
+			if err == nil {
+				_, err = stream.Response()
+			}
+			var contextual *Error
+			if !errors.As(err, &contextual) {
+				t.Fatalf("truncated stream error = %T %v, want *Error", err, err)
+			}
+			if contextual.Provider != target.provider ||
+				contextual.Flavor != target.flavor ||
+				contextual.Operation != "generate_stream" {
+				t.Fatalf("error context = %+v", contextual)
+			}
+			if contextual.Code == "" {
+				t.Fatalf("error code is empty: %+v", contextual)
+			}
+		})
+	}
+}
+
+// newContractTruncatedStreamTarget stops each target's output right after the
+// text deltas, before the event that marks the response complete.
+func newContractTruncatedStreamTarget(t *testing.T, provider Provider, flavor Flavor) *Client {
+	t.Helper()
+
+	config := Config{Provider: provider, Flavor: flavor, Model: "contract-model"}
+	if flavor == FlavorCLI {
+		lines := contractStreamLines(provider)
+		if provider == ProviderClaude {
+			lines = lines[:4] // no result line
+		} else {
+			lines = lines[:3] // no item.completed, no turn.completed
+		}
+		runner := &fakeStreamingRunner{lines: lines}
+		return newCLIStreamClient(config, runner.run)
+	}
+
+	events := contractSSEEvents(provider)
+	if provider == ProviderClaude {
+		events = events[:4] // no content_block_stop, message_delta, or message_stop
+	} else {
+		events = events[:2] // no response.completed
+	}
+	server, _ := newSSETestServer(t, http.StatusOK, events)
+	config.APIKey = "contract-key"
+	config.BaseURL = server.URL
+	client, err := New(config)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	return client
+}

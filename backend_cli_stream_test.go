@@ -375,9 +375,200 @@ func TestStreamingCommandHelperProcess(t *testing.T) {
 	case "lines":
 		fmt.Fprintln(os.Stdout, "line-1")
 		fmt.Fprintln(os.Stdout, "line-2")
+	case "exit":
+		fmt.Fprintln(os.Stdout, "line-1")
+		fmt.Fprintln(os.Stdout, "line-2")
+		return
 	}
 
 	for {
 		time.Sleep(time.Hour)
+	}
+}
+
+func TestCLIChunkStreamSkipsBlankLines(t *testing.T) {
+	t.Parallel()
+
+	// CLIs pad their JSONL output with blank and whitespace-only lines; those
+	// must never reach the parser or surface as chunks.
+	runner := &fakeStreamingRunner{lines: []string{"", "one", "   ", "", "two", ""}}
+	process, err := runner.run(context.Background(), "fake", nil, nil)
+	if err != nil {
+		t.Fatalf("run(): %v", err)
+	}
+	parser := &countingEventParser{}
+	stream := newCLIChunkStream(ProviderClaude, process, parser)
+	defer stream.close()
+
+	var chunks []string
+	for {
+		chunk, err := stream.recv()
+		if errors.Is(err, errStreamDone) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("recv(): %v", err)
+		}
+		chunks = append(chunks, chunk.Text)
+	}
+	if strings.Join(chunks, "|") != "one|two" {
+		t.Fatalf("chunks = %#v, want the two non-blank lines", chunks)
+	}
+	if parser.lines != 2 {
+		t.Fatalf("parser saw %d lines, want 2", parser.lines)
+	}
+}
+
+func TestCLIStreamCancellationIsNormalized(t *testing.T) {
+	t.Parallel()
+
+	// A cancelled run ends with the process reporting the context error rather
+	// than an exit code, and that has to reach the caller as a normalized error.
+	runner := &fakeStreamingRunner{
+		lines:   claudeStreamJSONLines()[:5],
+		stderr:  []byte("interrupted\n"),
+		waitErr: context.Canceled,
+	}
+	client := newCLIStreamClient(Config{
+		Provider: ProviderClaude,
+		Flavor:   FlavorCLI,
+		Model:    "claude-test",
+	}, runner.run)
+
+	stream, err := client.GenerateStream(context.Background(), streamRequest())
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+
+	chunks, err, _ := collectStream(t, stream)
+	if strings.Join(chunks, "|") != "Hello, |world" {
+		t.Fatalf("chunks = %#v, want the chunks delivered before cancellation", chunks)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("stream error = %v, want context.Canceled", err)
+	}
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("stream error = %T %v, want *Error", err, err)
+	}
+	if target.Provider != ProviderClaude || target.Flavor != FlavorCLI || target.Operation != "generate_stream" {
+		t.Fatalf("error context = %+v", target)
+	}
+	if target.Message != "interrupted" {
+		t.Fatalf("message = %q, want the captured stderr", target.Message)
+	}
+	if target.Status != 0 {
+		t.Fatalf("status = %d, want 0 for a cancelled run", target.Status)
+	}
+}
+
+func TestCLIChunkStreamNonzeroExitWithoutStderr(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeStreamingRunner{lines: []string{"one"}, exitCode: 2}
+	process, err := runner.run(context.Background(), "fake", nil, nil)
+	if err != nil {
+		t.Fatalf("run(): %v", err)
+	}
+	stream := newCLIChunkStream(ProviderOpenAI, process, &countingEventParser{})
+	defer stream.close()
+
+	if _, err := stream.recv(); err != nil {
+		t.Fatalf("first recv(): %v", err)
+	}
+	_, err = stream.recv()
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("recv() error = %T %v, want *Error", err, err)
+	}
+	if target.Status != 2 {
+		t.Fatalf("status = %d, want 2", target.Status)
+	}
+	// A silent failure still has to say something.
+	if target.Message == "" {
+		t.Fatal("message is empty for a nonzero exit without stderr")
+	}
+}
+
+func TestCLIChunkStreamRepeatsFailureAfterError(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeStreamingRunner{lines: []string{"not-json", `{"type":"result","subtype":"success"}`}}
+	process, err := runner.run(context.Background(), "fake", nil, nil)
+	if err != nil {
+		t.Fatalf("run(): %v", err)
+	}
+	stream := newCLIChunkStream(ProviderClaude, process, &claudeCLIStreamParser{model: "claude-test"})
+	defer stream.close()
+
+	_, first := stream.recv()
+	if first == nil {
+		t.Fatal("recv() error = nil for a malformed line")
+	}
+	// A stream that has already failed keeps reporting the same failure instead
+	// of resuming into later output or waiting on the process a second time.
+	_, second := stream.recv()
+	if second != first {
+		t.Fatalf("second recv() error = %v, want the recorded failure %v", second, first)
+	}
+}
+
+func TestStreamingCommandStartFailureIsReported(t *testing.T) {
+	t.Parallel()
+
+	// Executable permissions but not an executable format: LookPath succeeds and
+	// Start is what fails, so the runner must report it instead of handing back a
+	// process that never ran.
+	path := filepath.Join(t.TempDir(), "not-a-binary")
+	if err := os.WriteFile(path, []byte("\x00\x01not an executable"), 0o755); err != nil {
+		t.Fatalf("write fake executable: %v", err)
+	}
+
+	process, err := defaultStreamingCommandRunner(context.Background(), path, nil, nil)
+	if err == nil {
+		_ = process.close()
+		t.Fatal("defaultStreamingCommandRunner() error = nil for an unstartable binary")
+	}
+	if process != nil {
+		t.Fatalf("process = %v, want nil after a failed start", process)
+	}
+	if errors.Is(err, ErrExecutableNotFound) {
+		t.Fatalf("error = %v, want a start failure rather than a lookup failure", err)
+	}
+}
+
+func TestStreamingCommandReportsCleanExit(t *testing.T) {
+	t.Setenv("LLMWRAPPER_STREAM_HELPER", "exit")
+
+	process, err := defaultStreamingCommandRunner(
+		context.Background(),
+		os.Args[0],
+		[]string{"-test.run=^TestStreamingCommandHelperProcess$"},
+		[]byte("prompt"),
+	)
+	if err != nil {
+		t.Fatalf("defaultStreamingCommandRunner(): %v", err)
+	}
+	defer process.close()
+
+	stdout, err := io.ReadAll(process.stdout())
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if !strings.Contains(string(stdout), "line-1\nline-2\n") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+
+	exitCode, _, waitErr := process.wait()
+	if waitErr != nil {
+		t.Fatalf("wait() error = %v", waitErr)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
+	}
+	// wait is documented as safe to call more than once.
+	if _, _, waitErr := process.wait(); waitErr != nil {
+		t.Fatalf("second wait() error = %v", waitErr)
 	}
 }

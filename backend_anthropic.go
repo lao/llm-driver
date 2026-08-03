@@ -77,6 +77,7 @@ func (b *anthropicBackend) params(request Request) anthropic.MessageNewParams {
 type anthropicChunkStream struct {
 	stream  *ssestream.Stream[anthropic.MessageStreamEventUnion]
 	message anthropic.Message
+	stopped bool
 }
 
 func (s *anthropicChunkStream) recv() (Chunk, error) {
@@ -84,6 +85,9 @@ func (s *anthropicChunkStream) recv() (Chunk, error) {
 		event := s.stream.Current()
 		if err := s.message.Accumulate(event); err != nil {
 			return Chunk{}, normalizeAnthropicStreamError(err)
+		}
+		if event.Type == "message_stop" {
+			s.stopped = true
 		}
 		if event.Type == "content_block_delta" && event.Delta.Type == "text_delta" {
 			return Chunk{Text: event.Delta.Text}, nil
@@ -95,7 +99,19 @@ func (s *anthropicChunkStream) recv() (Chunk, error) {
 	return Chunk{}, errStreamDone
 }
 
+// finish requires the terminal message_stop event: a body that ends early is a
+// clean EOF to the SDK, so without this check a truncated stream would be
+// reported as a complete response with partial text and stale usage.
 func (s *anthropicChunkStream) finish() (*Response, error) {
+	if !s.stopped {
+		return nil, &Error{
+			Provider:  ProviderClaude,
+			Flavor:    FlavorAPI,
+			Operation: "generate_stream",
+			Code:      "missing_message_completion",
+			Message:   "Anthropic stream ended without a completed message",
+		}
+	}
 	return anthropicResponse(&s.message), nil
 }
 
