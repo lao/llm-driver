@@ -78,6 +78,12 @@ type Response struct {
 	Flavor Flavor `json:"flavor"`
 }
 
+// Chunk is one incremental piece of response text.
+type Chunk struct {
+	// Text is the incremental response text; it is never empty.
+	Text string
+}
+
 // User builds a user-role text message.
 func User(text string) Message {
 	return Message{Role: RoleUser, Text: text}

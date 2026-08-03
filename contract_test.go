@@ -12,20 +12,26 @@ import (
 	"github.com/lao/llmwrapper/internal/core"
 )
 
-func TestContractGenerateAcrossFourTargets(t *testing.T) {
-	t.Parallel()
+// contractTarget is one of the four provider/flavor combinations every contract
+// test runs against.
+type contractTarget struct {
+	provider Provider
+	flavor   Flavor
+}
 
-	targets := []struct {
-		provider Provider
-		flavor   Flavor
-	}{
+func contractTargets() []contractTarget {
+	return []contractTarget{
 		{provider: ProviderClaude, flavor: FlavorAPI},
 		{provider: ProviderClaude, flavor: FlavorCLI},
 		{provider: ProviderOpenAI, flavor: FlavorAPI},
 		{provider: ProviderOpenAI, flavor: FlavorCLI},
 	}
+}
 
-	for _, target := range targets {
+func TestContractGenerateAcrossFourTargets(t *testing.T) {
+	t.Parallel()
+
+	for _, target := range contractTargets() {
 		t.Run(string(target.provider)+"/"+string(target.flavor), func(t *testing.T) {
 			t.Parallel()
 

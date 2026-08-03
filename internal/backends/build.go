@@ -14,10 +14,27 @@ type apiBackendConfig struct {
 }
 
 type cliBackendConfig struct {
-	model  string
-	path   string
-	args   []string
-	runner core.CommandRunner
+	model        string
+	path         string
+	args         []string
+	runner       core.CommandRunner
+	streamRunner streamingCommandRunner
+}
+
+// withCLIDefaults supplies the executable and runners a CLI backend falls back
+// to when the caller left them unset, and copies the caller's extra arguments.
+func withCLIDefaults(config cliBackendConfig, defaultPath string) cliBackendConfig {
+	if config.path == "" {
+		config.path = defaultPath
+	}
+	if config.runner == nil {
+		config.runner = defaultCommandRunner
+	}
+	if config.streamRunner == nil {
+		config.streamRunner = defaultStreamingCommandRunner
+	}
+	config.args = append([]string(nil), config.args...)
+	return config
 }
 
 // New builds the backend selected by the config. A nil runner selects the

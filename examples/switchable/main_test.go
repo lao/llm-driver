@@ -123,3 +123,34 @@ func TestExitCodeReportsInvalidArguments(t *testing.T) {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
+
+func TestParseOptionsStreamFlag(t *testing.T) {
+	t.Parallel()
+
+	base := []string{"--provider", "claude", "--flavor", "cli", "--model", "claude-test", "--prompt", "hello"}
+	parsed, err := parseOptions(base, new(strings.Builder))
+	if err != nil {
+		t.Fatalf("parseOptions(): %v", err)
+	}
+	if parsed.stream {
+		t.Fatal("stream = true without --stream")
+	}
+
+	parsed, err = parseOptions(append(base, "--stream"), new(strings.Builder))
+	if err != nil {
+		t.Fatalf("parseOptions(--stream): %v", err)
+	}
+	if !parsed.stream {
+		t.Fatal("stream = false with --stream")
+	}
+}
+
+func TestParseOptionsHelpDescribesStreaming(t *testing.T) {
+	t.Parallel()
+
+	var output strings.Builder
+	_, _ = parseOptions([]string{"--help"}, &output)
+	if !strings.Contains(output.String(), "--stream") {
+		t.Fatalf("help missing --stream:\n%s", output.String())
+	}
+}

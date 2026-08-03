@@ -27,6 +27,8 @@ type (
 	// Error adds target and operation context to configuration and runtime
 	// failures.
 	Error = core.Error
+	// Chunk is one incremental piece of streaming response text.
+	Chunk = core.Chunk
 )
 
 const (

@@ -1,12 +1,15 @@
 package backends
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lao/llmwrapper/internal/core"
@@ -15,6 +18,10 @@ import (
 const (
 	maxCLIOutputBytes   = 16 << 20
 	cliCommandWaitDelay = 250 * time.Millisecond
+	// cliFailDrainTimeout bounds the best-effort drain-and-stamp on the failure
+	// path so a CLI that emits its final line and then hangs (no more bytes, no
+	// exit, no stdout EOF) cannot hold recv open forever.
+	cliFailDrainTimeout = 2 * time.Second
 )
 
 var errCLIOutputTooLarge = errors.New("llmwrapper: CLI output exceeds limit")
@@ -110,6 +117,261 @@ func executeCLI(
 		}
 	}
 	return stdout, nil
+}
+
+// cliProcess is a running provider CLI whose stdout is consumed incrementally.
+type cliProcess interface {
+	// stdout returns the process's standard output.
+	stdout() io.Reader
+	// wait blocks for exit and reports the exit code and captured stderr. It is
+	// safe to call more than once and concurrently with close.
+	wait() (int, []byte, error)
+	// close terminates the process tree and releases the pipe. It is idempotent.
+	close() error
+}
+
+// streamingCommandRunner starts a CLI whose output is read while it runs. It
+// complements core.CommandRunner, which buffers a whole batch invocation.
+type streamingCommandRunner func(context.Context, string, []string, []byte) (cliProcess, error)
+
+func defaultStreamingCommandRunner(
+	ctx context.Context,
+	name string,
+	args []string,
+	stdin []byte,
+) (cliProcess, error) {
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", core.ErrExecutableNotFound, name)
+	}
+
+	// The derived context lets close terminate the process tree through the same
+	// platform-specific cancel hook that context cancellation uses.
+	runCtx, cancel := context.WithCancel(ctx)
+	command := exec.CommandContext(runCtx, path, args...)
+	configureCommand(command)
+	command.WaitDelay = cliCommandWaitDelay
+	command.Stdin = bytes.NewReader(stdin)
+	stderr := newBoundedBuffer(maxCLIOutputBytes)
+	command.Stderr = stderr
+
+	pipe, err := command.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if err := command.Start(); err != nil {
+		cancel()
+		return nil, err
+	}
+	return &execCLIProcess{
+		parent:  ctx,
+		cancel:  cancel,
+		command: command,
+		pipe:    pipe,
+		stderr:  stderr,
+	}, nil
+}
+
+type execCLIProcess struct {
+	parent  context.Context
+	cancel  context.CancelFunc
+	command *exec.Cmd
+	pipe    io.ReadCloser
+	stderr  *boundedBuffer
+
+	waitOnce sync.Once
+	waitErr  error
+}
+
+func (p *execCLIProcess) stdout() io.Reader {
+	return p.pipe
+}
+
+func (p *execCLIProcess) wait() (int, []byte, error) {
+	p.waitOnce.Do(func() { p.waitErr = p.command.Wait() })
+
+	stderr := p.stderr.Bytes()
+	if p.waitErr == nil {
+		return 0, stderr, nil
+	}
+	if err := p.parent.Err(); err != nil {
+		return 0, stderr, err
+	}
+	if p.stderr.overflow {
+		return 0, stderr, errCLIOutputTooLarge
+	}
+	var exitError *exec.ExitError
+	if errors.As(p.waitErr, &exitError) {
+		return exitError.ExitCode(), stderr, nil
+	}
+	return 0, stderr, p.waitErr
+}
+
+func (p *execCLIProcess) close() error {
+	p.cancel()
+	p.waitOnce.Do(func() { p.waitErr = p.command.Wait() })
+	return nil
+}
+
+// cliEventParser maps a provider CLI's output lines to response text and builds
+// the final response once the process exits.
+type cliEventParser interface {
+	// event consumes one non-empty output line and returns the text it adds,
+	// which is empty for lines that carry no response text.
+	event(line []byte) (string, error)
+	// response builds the final response after a clean exit.
+	response() (*core.Response, error)
+}
+
+// cliChunkStream drives a streaming CLI subprocess: it scans stdout lines into
+// chunks and turns exit status into the same normalized errors executeCLI
+// produces for the batch path.
+type cliChunkStream struct {
+	provider core.Provider
+	process  cliProcess
+	scanner  *bufio.Scanner
+	parser   cliEventParser
+	failure  error
+}
+
+func newCLIChunkStream(provider core.Provider, process cliProcess, parser cliEventParser) *cliChunkStream {
+	scanner := bufio.NewScanner(process.stdout())
+	scanner.Buffer(make([]byte, 64*1024), maxCLIOutputBytes)
+	return &cliChunkStream{
+		provider: provider,
+		process:  process,
+		scanner:  scanner,
+		parser:   parser,
+	}
+}
+
+func (s *cliChunkStream) Recv() (core.Chunk, error) {
+	if s.failure != nil {
+		return core.Chunk{}, s.failure
+	}
+	for s.scanner.Scan() {
+		line := bytes.TrimSpace(s.scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		text, err := s.parser.event(line)
+		if err != nil {
+			return core.Chunk{}, s.fail(err)
+		}
+		if text != "" {
+			return core.Chunk{Text: text}, nil
+		}
+	}
+	if err := s.scanner.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			err = errCLIOutputTooLarge
+		}
+		return core.Chunk{}, s.fail(s.streamError(err, ""))
+	}
+	if err := s.exit(); err != nil {
+		s.failure = err
+		return core.Chunk{}, err
+	}
+	return core.Chunk{}, core.ErrStreamDone
+}
+
+func (s *cliChunkStream) Finish() (*core.Response, error) {
+	return s.parser.response()
+}
+
+func (s *cliChunkStream) Close() error {
+	return s.process.close()
+}
+
+// fail records a terminal parse failure and, for parity with the batch path,
+// stamps the process exit code onto it when the CLI also exited nonzero.
+// Remaining output is drained first: waiting on a process whose stdout is not
+// being read would deadlock. Both the byte drain and the timer bound the wait:
+// a CLI that keeps writing hits the byte limit, and a CLI that emits its final
+// line then idles without exiting (no stdout EOF) hits cliFailDrainTimeout. On
+// either bound the exit code is not worth waiting for, and close terminates the
+// process (its cancel also unblocks the drain goroutine).
+func (s *cliChunkStream) fail(err error) error {
+	s.failure = err
+
+	done := make(chan int, 1)
+	go func() {
+		drained, _ := io.Copy(io.Discard, io.LimitReader(s.process.stdout(), maxCLIOutputBytes))
+		if drained >= maxCLIOutputBytes {
+			done <- 0
+			return
+		}
+		exitCode, _, waitErr := s.process.wait()
+		if waitErr != nil {
+			exitCode = 0
+		}
+		done <- exitCode
+	}()
+
+	timer := time.NewTimer(cliFailDrainTimeout)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return err
+	case exitCode := <-done:
+		if exitCode == 0 {
+			return err
+		}
+		var contextual *core.Error
+		if errors.As(err, &contextual) && contextual.Status == 0 {
+			contextual.Status = exitCode
+		}
+		return err
+	}
+}
+
+func (s *cliChunkStream) exit() error {
+	exitCode, stderr, err := s.process.wait()
+	if err != nil {
+		return s.streamError(err, strings.TrimSpace(string(stderr)))
+	}
+	if exitCode != 0 {
+		message := strings.TrimSpace(string(stderr))
+		if message == "" {
+			message = "CLI command failed"
+		}
+		failure := s.streamError(nil, message)
+		failure.Status = exitCode
+		return failure
+	}
+	return nil
+}
+
+func (s *cliChunkStream) streamError(err error, message string) *core.Error {
+	return &core.Error{
+		Provider:  s.provider,
+		Flavor:    core.FlavorCLI,
+		Operation: "generate_stream",
+		Message:   message,
+		Err:       err,
+	}
+}
+
+// startCLIStream launches a streaming CLI and normalizes launch failures.
+func startCLIStream(
+	ctx context.Context,
+	provider core.Provider,
+	name string,
+	args []string,
+	stdin []byte,
+	runner streamingCommandRunner,
+) (cliProcess, error) {
+	process, err := runner(ctx, name, args, stdin)
+	if err != nil {
+		return nil, &core.Error{
+			Provider:  provider,
+			Flavor:    core.FlavorCLI,
+			Operation: "generate_stream",
+			Err:       err,
+		}
+	}
+	return process, nil
 }
 
 func renderTranscript(messages []core.Message) string {

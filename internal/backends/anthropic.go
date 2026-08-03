@@ -8,6 +8,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 
 	"github.com/lao/llmwrapper/internal/core"
 )
@@ -35,6 +36,25 @@ func newAnthropicBackend(config apiBackendConfig) *anthropicBackend {
 }
 
 func (b *anthropicBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
+	message, err := b.client.Messages.New(ctx, b.params(request))
+	if err != nil {
+		return nil, normalizeAnthropicError(err)
+	}
+	return anthropicResponse(message), nil
+}
+
+func (b *anthropicBackend) GenerateStream(ctx context.Context, request core.Request) (core.ChunkStream, error) {
+	stream := b.client.Messages.NewStreaming(ctx, b.params(request))
+	// NewStreaming records transport and non-2xx failures before any event is
+	// read, so a failed start is reported by GenerateStream rather than Next.
+	if err := stream.Err(); err != nil {
+		_ = stream.Close()
+		return nil, normalizeAnthropicStreamError(err)
+	}
+	return &anthropicChunkStream{stream: stream}, nil
+}
+
+func (b *anthropicBackend) params(request core.Request) anthropic.MessageNewParams {
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(b.model),
 		MaxTokens: int64(request.MaxTokens),
@@ -51,12 +71,57 @@ func (b *anthropicBackend) Generate(ctx context.Context, request core.Request) (
 			params.Messages = append(params.Messages, anthropic.NewUserMessage(block))
 		}
 	}
+	return params
+}
 
-	message, err := b.client.Messages.New(ctx, params)
-	if err != nil {
-		return nil, normalizeAnthropicError(err)
+// anthropicChunkStream turns Messages SSE events into chunks while the SDK's
+// Message.Accumulate helper rebuilds the final message for finish.
+type anthropicChunkStream struct {
+	stream  *ssestream.Stream[anthropic.MessageStreamEventUnion]
+	message anthropic.Message
+	stopped bool
+}
+
+func (s *anthropicChunkStream) Recv() (core.Chunk, error) {
+	for s.stream.Next() {
+		event := s.stream.Current()
+		if err := s.message.Accumulate(event); err != nil {
+			return core.Chunk{}, normalizeAnthropicStreamError(err)
+		}
+		if event.Type == "message_stop" {
+			s.stopped = true
+		}
+		if event.Type == "content_block_delta" && event.Delta.Type == "text_delta" {
+			return core.Chunk{Text: event.Delta.Text}, nil
+		}
 	}
+	if err := s.stream.Err(); err != nil {
+		return core.Chunk{}, normalizeAnthropicStreamError(err)
+	}
+	return core.Chunk{}, core.ErrStreamDone
+}
 
+// Finish requires the terminal message_stop event: a body that ends early is a
+// clean EOF to the SDK, so without this check a truncated stream would be
+// reported as a complete response with partial text and stale usage.
+func (s *anthropicChunkStream) Finish() (*core.Response, error) {
+	if !s.stopped {
+		return nil, &core.Error{
+			Provider:  core.ProviderClaude,
+			Flavor:    core.FlavorAPI,
+			Operation: "generate_stream",
+			Code:      "missing_message_completion",
+			Message:   "Anthropic stream ended without a completed message",
+		}
+	}
+	return anthropicResponse(&s.message), nil
+}
+
+func (s *anthropicChunkStream) Close() error {
+	return s.stream.Close()
+}
+
+func anthropicResponse(message *anthropic.Message) *core.Response {
 	var text strings.Builder
 	for _, block := range message.Content {
 		if block.Type == "text" {
@@ -74,14 +139,22 @@ func (b *anthropicBackend) Generate(ctx context.Context, request core.Request) (
 			CachedInputTokens:        int(message.Usage.CacheReadInputTokens),
 			CacheCreationInputTokens: int(message.Usage.CacheCreationInputTokens),
 		},
-	}, nil
+	}
 }
 
 func normalizeAnthropicError(err error) error {
+	return normalizeAnthropicOperationError(err, "generate")
+}
+
+func normalizeAnthropicStreamError(err error) error {
+	return normalizeAnthropicOperationError(err, "generate_stream")
+}
+
+func normalizeAnthropicOperationError(err error, operation string) error {
 	normalized := &core.Error{
 		Provider:  core.ProviderClaude,
 		Flavor:    core.FlavorAPI,
-		Operation: "generate",
+		Operation: operation,
 		Err:       err,
 	}
 	var apiError *anthropic.Error

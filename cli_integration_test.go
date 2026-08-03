@@ -65,21 +65,57 @@ func runCLIIntegrationSmoke(t *testing.T, provider Provider, binary, modelEnv st
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	response, err := client.Generate(ctx, Request{
+	request := Request{
 		System:    "Answer with a single short word.",
 		MaxTokens: 64,
 		Messages:  []Message{User("Reply with the word ready.")},
-	})
+	}
+
+	response, err := client.Generate(ctx, request)
 	if err != nil {
-		var cliError *Error
-		if errors.As(err, &cliError) && mentionsUnknownFlag(cliError) {
-			t.Fatalf("%s CLI rejected a flag (flag drift): %v", binary, err)
-		}
-		t.Fatalf("%s CLI Generate(): %v", binary, err)
+		reportCLIFailure(t, binary, "Generate", err)
 	}
 	if strings.TrimSpace(response.Text) == "" {
 		t.Fatalf("%s CLI returned empty text", binary)
 	}
+
+	// Streaming adds flags the batch path never passes (stream-json output,
+	// partial messages, verbose), so it needs its own live invocation for flag
+	// drift to surface here rather than at runtime.
+	stream, err := client.GenerateStream(ctx, request)
+	if err != nil {
+		reportCLIFailure(t, binary, "GenerateStream", err)
+	}
+	defer stream.Close()
+
+	var streamed strings.Builder
+	for stream.Next() {
+		streamed.WriteString(stream.Current().Text)
+	}
+	if err := stream.Err(); err != nil {
+		reportCLIFailure(t, binary, "GenerateStream", err)
+	}
+	streamResponse, err := stream.Response()
+	if err != nil {
+		reportCLIFailure(t, binary, "GenerateStream", err)
+	}
+	if strings.TrimSpace(streamed.String()) == "" {
+		t.Fatalf("%s CLI streamed no text", binary)
+	}
+	if streamResponse.Text != streamed.String() {
+		t.Fatalf("%s CLI stream response text = %q, want the concatenated chunks %q",
+			binary, streamResponse.Text, streamed.String())
+	}
+}
+
+func reportCLIFailure(t *testing.T, binary, operation string, err error) {
+	t.Helper()
+
+	var cliError *Error
+	if errors.As(err, &cliError) && mentionsUnknownFlag(cliError) {
+		t.Fatalf("%s CLI rejected a flag (flag drift) during %s: %v", binary, operation, err)
+	}
+	t.Fatalf("%s CLI %s(): %v", binary, operation, err)
 }
 
 func mentionsUnknownFlag(cliError *Error) bool {
