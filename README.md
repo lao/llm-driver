@@ -30,7 +30,7 @@ import (
 	"fmt"
 	"log"
 
-	llm-driver "github.com/lao/llm-driver"
+	llmdriver "github.com/lao/llm-driver"
 )
 
 func main() {
