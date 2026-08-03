@@ -7,6 +7,7 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/ssestream"
 	"github.com/openai/openai-go/v3/responses"
 )
 
@@ -33,6 +34,28 @@ func newOpenAIBackend(config apiBackendConfig) *openAIBackend {
 }
 
 func (b *openAIBackend) generate(ctx context.Context, request Request) (*Response, error) {
+	response, err := b.client.Responses.New(ctx, b.params(request))
+	if err != nil {
+		return nil, normalizeOpenAIError(err, "generate")
+	}
+	if err := validateOpenAIResponse(response, "generate"); err != nil {
+		return nil, err
+	}
+	return openAIResponse(response), nil
+}
+
+func (b *openAIBackend) generateStream(ctx context.Context, request Request) (chunkStream, error) {
+	stream := b.client.Responses.NewStreaming(ctx, b.params(request))
+	// NewStreaming records transport and non-2xx failures before any event is
+	// read, so a failed start is reported by GenerateStream rather than Next.
+	if err := stream.Err(); err != nil {
+		_ = stream.Close()
+		return nil, normalizeOpenAIError(err, "generate_stream")
+	}
+	return &openAIChunkStream{stream: stream}, nil
+}
+
+func (b *openAIBackend) params(request Request) responses.ResponseNewParams {
 	input := make(responses.ResponseInputParam, 0, len(request.Messages))
 	for _, message := range request.Messages {
 		content := responses.ResponseInputMessageContentListParam{
@@ -60,14 +83,74 @@ func (b *openAIBackend) generate(ctx context.Context, request Request) (*Respons
 	if request.System != "" {
 		params.Instructions = openai.String(request.System)
 	}
+	return params
+}
 
-	response, err := b.client.Responses.New(ctx, params)
-	if err != nil {
-		return nil, normalizeOpenAIError(err)
+// openAIChunkStream turns Responses SSE output-text deltas into chunks and
+// keeps the completed response event for finish.
+type openAIChunkStream struct {
+	stream    *ssestream.Stream[responses.ResponseStreamEventUnion]
+	completed *responses.Response
+}
+
+func (s *openAIChunkStream) recv() (Chunk, error) {
+	for s.stream.Next() {
+		event := s.stream.Current()
+		switch event.Type {
+		case "response.output_text.delta", "response.refusal.delta":
+			return Chunk{Text: event.Delta}, nil
+		case "response.completed", "response.failed", "response.incomplete":
+			response := event.Response
+			s.completed = &response
+		case "error":
+			return Chunk{}, openAIStreamEventError(event)
+		}
 	}
-	if err := validateOpenAIResponse(response); err != nil {
+	if err := s.stream.Err(); err != nil {
+		return Chunk{}, normalizeOpenAIError(err, "generate_stream")
+	}
+	return Chunk{}, errStreamDone
+}
+
+func (s *openAIChunkStream) finish() (*Response, error) {
+	if s.completed == nil {
+		return nil, &Error{
+			Provider:  ProviderOpenAI,
+			Flavor:    FlavorAPI,
+			Operation: "generate_stream",
+			Code:      "missing_response_completion",
+			Message:   "OpenAI stream ended without a completed response",
+		}
+	}
+	if err := validateOpenAIResponse(s.completed, "generate_stream"); err != nil {
 		return nil, err
 	}
+	return openAIResponse(s.completed), nil
+}
+
+func (s *openAIChunkStream) close() error {
+	return s.stream.Close()
+}
+
+func openAIStreamEventError(event responses.ResponseStreamEventUnion) error {
+	code := event.Code
+	if code == "" {
+		code = "stream_error"
+	}
+	message := event.Message
+	if message == "" {
+		message = "OpenAI stream reported an error"
+	}
+	return &Error{
+		Provider:  ProviderOpenAI,
+		Flavor:    FlavorAPI,
+		Operation: "generate_stream",
+		Code:      code,
+		Message:   message,
+	}
+}
+
+func openAIResponse(response *responses.Response) *Response {
 	return &Response{
 		ID:               response.ID,
 		Model:            string(response.Model),
@@ -80,10 +163,10 @@ func (b *openAIBackend) generate(ctx context.Context, request Request) (*Respons
 			CacheCreationInputTokens: int(response.Usage.InputTokensDetails.CacheWriteTokens),
 			ReasoningTokens:          int(response.Usage.OutputTokensDetails.ReasoningTokens),
 		},
-	}, nil
+	}
 }
 
-func validateOpenAIResponse(response *responses.Response) error {
+func validateOpenAIResponse(response *responses.Response, operation string) error {
 	if response.Status == responses.ResponseStatusIncomplete &&
 		response.IncompleteDetails.Reason == "max_output_tokens" &&
 		response.Error.Code == "" {
@@ -105,7 +188,7 @@ func validateOpenAIResponse(response *responses.Response) error {
 		return &Error{
 			Provider:  ProviderOpenAI,
 			Flavor:    FlavorAPI,
-			Operation: "generate",
+			Operation: operation,
 			Code:      code,
 			Message:   message,
 		}
@@ -144,11 +227,11 @@ func openAICompletionReason(response *responses.Response) CompletionReason {
 	return CompletionReasonStop
 }
 
-func normalizeOpenAIError(err error) error {
+func normalizeOpenAIError(err error, operation string) error {
 	normalized := &Error{
 		Provider:  ProviderOpenAI,
 		Flavor:    FlavorAPI,
-		Operation: "generate",
+		Operation: operation,
 		Err:       err,
 	}
 	var apiError *openai.Error
@@ -161,9 +244,4 @@ func normalizeOpenAIError(err error) error {
 		}
 	}
 	return normalized
-}
-
-// TODO(S3): replaced by the Responses streaming adapter.
-func (b *openAIBackend) generateStream(context.Context, Request) (chunkStream, error) {
-	return nil, errors.New("not implemented")
 }
