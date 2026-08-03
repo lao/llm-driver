@@ -7,10 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 // newSSETestServer serves one text/event-stream response built from raw event
@@ -83,7 +84,7 @@ type scriptedStream struct {
 	blocked  chan struct{}
 }
 
-func (s *scriptedStream) recv() (Chunk, error) {
+func (s *scriptedStream) Recv() (Chunk, error) {
 	if s.index < len(s.chunks) {
 		text := s.chunks[s.index]
 		s.index++
@@ -95,10 +96,10 @@ func (s *scriptedStream) recv() (Chunk, error) {
 	if s.err != nil {
 		return Chunk{}, s.err
 	}
-	return Chunk{}, errStreamDone
+	return Chunk{}, core.ErrStreamDone
 }
 
-func (s *scriptedStream) finish() (*Response, error) {
+func (s *scriptedStream) Finish() (*Response, error) {
 	s.finishes++
 	if s.finishErr != nil {
 		return nil, s.finishErr
@@ -106,7 +107,7 @@ func (s *scriptedStream) finish() (*Response, error) {
 	return s.response, nil
 }
 
-func (s *scriptedStream) close() error {
+func (s *scriptedStream) Close() error {
 	s.closes++
 	if s.blocked != nil {
 		close(s.blocked)
@@ -115,7 +116,7 @@ func (s *scriptedStream) close() error {
 	return s.closeErr
 }
 
-func newScriptedClient(t *testing.T, source chunkStream) *Client {
+func newScriptedClient(t *testing.T, source core.ChunkStream) *Client {
 	t.Helper()
 
 	client, err := newClient(Config{
@@ -132,24 +133,24 @@ func newScriptedClient(t *testing.T, source chunkStream) *Client {
 }
 
 type scriptedBackend struct {
-	source chunkStream
+	source core.ChunkStream
 	err    error
 }
 
-func (b *scriptedBackend) generate(context.Context, Request) (*Response, error) {
+func (b *scriptedBackend) Generate(context.Context, Request) (*Response, error) {
 	return nil, errors.New("not used")
 }
 
-func (b *scriptedBackend) generateStream(context.Context, Request) (chunkStream, error) {
+func (b *scriptedBackend) GenerateStream(context.Context, Request) (core.ChunkStream, error) {
 	if b.err != nil {
 		return nil, b.err
 	}
 	return b.source, nil
 }
 
-// generateStream keeps the batch-path fake in client_test.go satisfying the
+// GenerateStream keeps the batch-path fake in client_test.go satisfying the
 // backend seam; streaming tests use scriptedBackend.
-func (f *fakeGenerationBackend) generateStream(context.Context, Request) (chunkStream, error) {
+func (f *fakeGenerationBackend) GenerateStream(context.Context, Request) (core.ChunkStream, error) {
 	return nil, errors.New("fakeGenerationBackend does not stream")
 }
 
@@ -365,84 +366,6 @@ func TestStreamFinishError(t *testing.T) {
 	}
 }
 
-func TestStreamCloseIsSafeConcurrentlyWithNext(t *testing.T) {
-	t.Parallel()
-
-	// The runner holds output after the first chunk, so Next is genuinely
-	// blocked when Close runs.
-	runner := &fakeStreamingRunner{
-		lines:    claudeStreamJSONLines(),
-		holdFrom: 4,
-		gate:     make(chan struct{}),
-	}
-	client := newCLIStreamClient(Config{
-		Provider: ProviderClaude,
-		Flavor:   FlavorCLI,
-		Model:    "claude-test",
-	}, runner.run)
-
-	stream, err := client.GenerateStream(context.Background(), streamRequest())
-	if err != nil {
-		t.Fatalf("GenerateStream(): %v", err)
-	}
-	if !stream.Next() {
-		t.Fatalf("Next() = false: %v", stream.Err())
-	}
-
-	advanced := make(chan bool, 1)
-	go func() { advanced <- stream.Next() }()
-
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close(): %v", err)
-	}
-	select {
-	case got := <-advanced:
-		if got {
-			t.Fatal("Next() = true after a concurrent Close()")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Next() did not return after Close()")
-	}
-}
-
-func TestStreamCloseLeavesNoGoroutines(t *testing.T) {
-	// Not parallel: the goroutine count is process-wide.
-	baseline := runtime.NumGoroutine()
-
-	for range 20 {
-		runner := &fakeStreamingRunner{
-			lines:    claudeStreamJSONLines(),
-			holdFrom: 4,
-			gate:     make(chan struct{}),
-		}
-		client := newCLIStreamClient(Config{
-			Provider: ProviderClaude,
-			Flavor:   FlavorCLI,
-			Model:    "claude-test",
-		}, runner.run)
-
-		stream, err := client.GenerateStream(context.Background(), streamRequest())
-		if err != nil {
-			t.Fatalf("GenerateStream(): %v", err)
-		}
-		if !stream.Next() {
-			t.Fatalf("Next() = false: %v", stream.Err())
-		}
-		// Abandon the stream mid-flight; Close must release everything it started.
-		if err := stream.Close(); err != nil {
-			t.Fatalf("Close(): %v", err)
-		}
-	}
-
-	deadline := time.Now().Add(5 * time.Second)
-	for runtime.NumGoroutine() > baseline+2 {
-		if time.Now().After(deadline) {
-			t.Fatalf("goroutines = %d, baseline %d", runtime.NumGoroutine(), baseline)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 // gatedStream parks inside recv until close releases it, so a test can pin down
 // what Next does with a chunk that only arrives after Close.
 type gatedStream struct {
@@ -454,15 +377,15 @@ type gatedStream struct {
 	releaseOnce sync.Once
 }
 
-func (s *gatedStream) recv() (Chunk, error) {
+func (s *gatedStream) Recv() (Chunk, error) {
 	s.enterOnce.Do(func() { close(s.entered) })
 	<-s.released
 	return s.late, nil
 }
 
-func (s *gatedStream) finish() (*Response, error) { return &Response{}, nil }
+func (s *gatedStream) Finish() (*Response, error) { return &Response{}, nil }
 
-func (s *gatedStream) close() error {
+func (s *gatedStream) Close() error {
 	s.releaseOnce.Do(func() { close(s.released) })
 	return nil
 }

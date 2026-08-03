@@ -6,31 +6,9 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
-
-// errStreamDone is the sentinel a chunkStream returns when no chunk remains.
-// It never reaches callers of the public API.
-var errStreamDone = errors.New("llmwrapper: stream done")
-
-// chunkStream is the per-adapter half of streaming: it maps provider events to
-// chunks and to a final Response. Text accumulation, empty-chunk suppression,
-// and target stamping happen once in Stream.
-type chunkStream interface {
-	// recv returns the next chunk, or errStreamDone once the provider stream
-	// ended normally.
-	recv() (Chunk, error)
-	// finish returns the final response, valid only after recv reported
-	// errStreamDone. Text is filled in by Stream.
-	finish() (*Response, error)
-	// close releases the underlying transport or subprocess.
-	close() error
-}
-
-// Chunk is one incremental piece of response text.
-type Chunk struct {
-	// Text is the incremental response text; it is never empty.
-	Text string
-}
 
 // Stream iterates response text chunks and terminates in a normalized
 // Response. It is not safe for concurrent use except that Close may be called
@@ -39,7 +17,7 @@ type Stream struct {
 	provider Provider
 	flavor   Flavor
 	model    string
-	source   chunkStream
+	source   core.ChunkStream
 
 	closed    atomic.Bool
 	closeOnce sync.Once
@@ -55,11 +33,11 @@ type Stream struct {
 // GenerateStream validates the request and starts one streaming generation
 // through the configured target. The caller must Close the returned stream.
 func (c *Client) GenerateStream(ctx context.Context, request Request) (*Stream, error) {
-	if err := request.validate(); err != nil {
+	if err := core.ValidateRequest(request); err != nil {
 		return nil, c.streamError(err, "")
 	}
 
-	source, err := c.backend.generateStream(ctx, request)
+	source, err := c.backend.GenerateStream(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -91,12 +69,12 @@ func (s *Stream) Next() bool {
 		return false
 	}
 	for {
-		chunk, err := s.source.recv()
+		chunk, err := s.source.Recv()
 		if s.closed.Load() {
 			return false
 		}
 		switch {
-		case errors.Is(err, errStreamDone):
+		case errors.Is(err, core.ErrStreamDone):
 			s.done = true
 			return false
 		case err != nil:
@@ -135,7 +113,7 @@ func (s *Stream) Response() (*Response, error) {
 		return nil, s.streamError(nil, "stream is not exhausted")
 	}
 
-	response, err := s.source.finish()
+	response, err := s.source.Finish()
 	if err != nil {
 		s.err = s.wrap(err)
 		return nil, s.err
@@ -159,7 +137,7 @@ func (s *Stream) Response() (*Response, error) {
 // may be called while another goroutine is blocked in Next.
 func (s *Stream) Close() error {
 	s.closed.Store(true)
-	s.closeOnce.Do(func() { s.closeErr = s.source.close() })
+	s.closeOnce.Do(func() { s.closeErr = s.source.Close() })
 	return s.closeErr
 }
 

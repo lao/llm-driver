@@ -1,4 +1,4 @@
-package llmwrapper
+package backends
 
 import (
 	"bufio"
@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 const (
@@ -23,8 +25,6 @@ const (
 )
 
 var errCLIOutputTooLarge = errors.New("llmwrapper: CLI output exceeds limit")
-
-type commandRunner func(context.Context, string, []string, []byte) ([]byte, []byte, int, error)
 
 type boundedBuffer struct {
 	buffer   bytes.Buffer
@@ -55,7 +55,7 @@ func (b *boundedBuffer) Bytes() []byte {
 func defaultCommandRunner(ctx context.Context, name string, args []string, stdin []byte) ([]byte, []byte, int, error) {
 	path, err := exec.LookPath(name)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("%w: %s", ErrExecutableNotFound, name)
+		return nil, nil, 0, fmt.Errorf("%w: %s", core.ErrExecutableNotFound, name)
 	}
 
 	command := exec.CommandContext(ctx, path, args...)
@@ -87,17 +87,17 @@ func defaultCommandRunner(ctx context.Context, name string, args []string, stdin
 
 func executeCLI(
 	ctx context.Context,
-	provider Provider,
+	provider core.Provider,
 	name string,
 	args []string,
 	stdin []byte,
-	runner commandRunner,
+	runner core.CommandRunner,
 ) ([]byte, error) {
 	stdout, stderr, exitCode, err := runner(ctx, name, args, stdin)
 	if err != nil {
-		return nil, &Error{
+		return nil, &core.Error{
 			Provider:  provider,
-			Flavor:    FlavorCLI,
+			Flavor:    core.FlavorCLI,
 			Operation: "generate",
 			Message:   strings.TrimSpace(string(stderr)),
 			Err:       err,
@@ -108,9 +108,9 @@ func executeCLI(
 		if message == "" {
 			message = "CLI command failed"
 		}
-		return stdout, &Error{
+		return stdout, &core.Error{
 			Provider:  provider,
-			Flavor:    FlavorCLI,
+			Flavor:    core.FlavorCLI,
 			Operation: "generate",
 			Status:    exitCode,
 			Message:   message,
@@ -131,7 +131,7 @@ type cliProcess interface {
 }
 
 // streamingCommandRunner starts a CLI whose output is read while it runs. It
-// complements commandRunner, which buffers a whole batch invocation.
+// complements core.CommandRunner, which buffers a whole batch invocation.
 type streamingCommandRunner func(context.Context, string, []string, []byte) (cliProcess, error)
 
 func defaultStreamingCommandRunner(
@@ -142,7 +142,7 @@ func defaultStreamingCommandRunner(
 ) (cliProcess, error) {
 	path, err := exec.LookPath(name)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrExecutableNotFound, name)
+		return nil, fmt.Errorf("%w: %s", core.ErrExecutableNotFound, name)
 	}
 
 	// The derived context lets close terminate the process tree through the same
@@ -221,21 +221,21 @@ type cliEventParser interface {
 	// which is empty for lines that carry no response text.
 	event(line []byte) (string, error)
 	// response builds the final response after a clean exit.
-	response() (*Response, error)
+	response() (*core.Response, error)
 }
 
 // cliChunkStream drives a streaming CLI subprocess: it scans stdout lines into
 // chunks and turns exit status into the same normalized errors executeCLI
 // produces for the batch path.
 type cliChunkStream struct {
-	provider Provider
+	provider core.Provider
 	process  cliProcess
 	scanner  *bufio.Scanner
 	parser   cliEventParser
 	failure  error
 }
 
-func newCLIChunkStream(provider Provider, process cliProcess, parser cliEventParser) *cliChunkStream {
+func newCLIChunkStream(provider core.Provider, process cliProcess, parser cliEventParser) *cliChunkStream {
 	scanner := bufio.NewScanner(process.stdout())
 	scanner.Buffer(make([]byte, 64*1024), maxCLIOutputBytes)
 	return &cliChunkStream{
@@ -246,9 +246,9 @@ func newCLIChunkStream(provider Provider, process cliProcess, parser cliEventPar
 	}
 }
 
-func (s *cliChunkStream) recv() (Chunk, error) {
+func (s *cliChunkStream) Recv() (core.Chunk, error) {
 	if s.failure != nil {
-		return Chunk{}, s.failure
+		return core.Chunk{}, s.failure
 	}
 	for s.scanner.Scan() {
 		line := bytes.TrimSpace(s.scanner.Bytes())
@@ -257,30 +257,30 @@ func (s *cliChunkStream) recv() (Chunk, error) {
 		}
 		text, err := s.parser.event(line)
 		if err != nil {
-			return Chunk{}, s.fail(err)
+			return core.Chunk{}, s.fail(err)
 		}
 		if text != "" {
-			return Chunk{Text: text}, nil
+			return core.Chunk{Text: text}, nil
 		}
 	}
 	if err := s.scanner.Err(); err != nil {
 		if errors.Is(err, bufio.ErrTooLong) {
 			err = errCLIOutputTooLarge
 		}
-		return Chunk{}, s.fail(s.streamError(err, ""))
+		return core.Chunk{}, s.fail(s.streamError(err, ""))
 	}
 	if err := s.exit(); err != nil {
 		s.failure = err
-		return Chunk{}, err
+		return core.Chunk{}, err
 	}
-	return Chunk{}, errStreamDone
+	return core.Chunk{}, core.ErrStreamDone
 }
 
-func (s *cliChunkStream) finish() (*Response, error) {
+func (s *cliChunkStream) Finish() (*core.Response, error) {
 	return s.parser.response()
 }
 
-func (s *cliChunkStream) close() error {
+func (s *cliChunkStream) Close() error {
 	return s.process.close()
 }
 
@@ -318,7 +318,7 @@ func (s *cliChunkStream) fail(err error) error {
 		if exitCode == 0 {
 			return err
 		}
-		var contextual *Error
+		var contextual *core.Error
 		if errors.As(err, &contextual) && contextual.Status == 0 {
 			contextual.Status = exitCode
 		}
@@ -343,10 +343,10 @@ func (s *cliChunkStream) exit() error {
 	return nil
 }
 
-func (s *cliChunkStream) streamError(err error, message string) *Error {
-	return &Error{
+func (s *cliChunkStream) streamError(err error, message string) *core.Error {
+	return &core.Error{
 		Provider:  s.provider,
-		Flavor:    FlavorCLI,
+		Flavor:    core.FlavorCLI,
 		Operation: "generate_stream",
 		Message:   message,
 		Err:       err,
@@ -356,7 +356,7 @@ func (s *cliChunkStream) streamError(err error, message string) *Error {
 // startCLIStream launches a streaming CLI and normalizes launch failures.
 func startCLIStream(
 	ctx context.Context,
-	provider Provider,
+	provider core.Provider,
 	name string,
 	args []string,
 	stdin []byte,
@@ -364,9 +364,9 @@ func startCLIStream(
 ) (cliProcess, error) {
 	process, err := runner(ctx, name, args, stdin)
 	if err != nil {
-		return nil, &Error{
+		return nil, &core.Error{
 			Provider:  provider,
-			Flavor:    FlavorCLI,
+			Flavor:    core.FlavorCLI,
 			Operation: "generate_stream",
 			Err:       err,
 		}
@@ -374,8 +374,8 @@ func startCLIStream(
 	return process, nil
 }
 
-func renderTranscript(messages []Message) string {
-	if len(messages) == 1 && messages[0].Role == RoleUser {
+func renderTranscript(messages []core.Message) string {
+	if len(messages) == 1 && messages[0].Role == core.RoleUser {
 		return messages[0].Text
 	}
 
@@ -384,7 +384,7 @@ func renderTranscript(messages []Message) string {
 		if i > 0 {
 			transcript.WriteString("\n\n")
 		}
-		if message.Role == RoleAssistant {
+		if message.Role == core.RoleAssistant {
 			transcript.WriteString("Assistant: ")
 		} else {
 			transcript.WriteString("User: ")

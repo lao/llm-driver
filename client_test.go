@@ -14,7 +14,7 @@ type fakeGenerationBackend struct {
 	calls    int
 }
 
-func (f *fakeGenerationBackend) generate(_ context.Context, request Request) (*Response, error) {
+func (f *fakeGenerationBackend) Generate(_ context.Context, request Request) (*Response, error) {
 	f.calls++
 	f.request = request
 	return f.response, f.err

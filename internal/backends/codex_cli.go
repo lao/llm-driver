@@ -1,4 +1,4 @@
-package llmwrapper
+package backends
 
 import (
 	"bufio"
@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 const maxCodexEventSize = 16 << 20
@@ -44,27 +46,27 @@ func newCodexCLIBackend(config cliBackendConfig) *codexCLIBackend {
 }
 
 // These flags target the non-interactive `codex exec` contract described in
-// SPEC.md (JSONL output, read-only sandbox, no git-repo check). Default tests
-// inject a fake runner and cannot catch a renamed or removed flag, so the
-// opt-in `go test -tags integration` smoke test in
-// backend_cli_integration_test.go launches the real binary to surface flag
-// drift against the installed `codex` version.
-func (b *codexCLIBackend) generate(ctx context.Context, request Request) (*Response, error) {
+// docs/SPEC.md (JSONL output, read-only sandbox, no git-repo check). Default
+// tests inject a fake runner and cannot catch a renamed or removed flag, so
+// the opt-in `go test -tags integration` smoke test in the root package's
+// cli_integration_test.go launches the real binary to surface flag drift
+// against the installed `codex` version.
+func (b *codexCLIBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
 	args := b.commandArgs(request)
 
 	stdout, err := executeCLI(
 		ctx,
-		ProviderOpenAI,
+		core.ProviderOpenAI,
 		b.path,
 		args,
 		[]byte(renderTranscript(request.Messages)),
 		b.runner,
 	)
 	if err != nil {
-		var processError *Error
+		var processError *core.Error
 		if errors.As(err, &processError) && processError.Status != 0 {
 			_, diagnosticErr := parseCodexCLIOutput(stdout, b.model)
-			var diagnostic *Error
+			var diagnostic *core.Error
 			if errors.As(diagnosticErr, &diagnostic) && (diagnostic.Code == "turn_failed" || diagnostic.Code == "error") {
 				diagnostic.Status = processError.Status
 				return nil, diagnostic
@@ -75,7 +77,7 @@ func (b *codexCLIBackend) generate(ctx context.Context, request Request) (*Respo
 	return parseCodexCLIOutput(stdout, b.model)
 }
 
-func (b *codexCLIBackend) commandArgs(request Request) []string {
+func (b *codexCLIBackend) commandArgs(request core.Request) []string {
 	args := []string{
 		"exec",
 		"--json",
@@ -90,12 +92,12 @@ func (b *codexCLIBackend) commandArgs(request Request) []string {
 	return append(args, "-")
 }
 
-// generateStream reuses the batch invocation and parses the same JSONL events
+// GenerateStream reuses the batch invocation and parses the same JSONL events
 // as they arrive instead of after the process exits.
-func (b *codexCLIBackend) generateStream(ctx context.Context, request Request) (chunkStream, error) {
+func (b *codexCLIBackend) GenerateStream(ctx context.Context, request core.Request) (core.ChunkStream, error) {
 	process, err := startCLIStream(
 		ctx,
-		ProviderOpenAI,
+		core.ProviderOpenAI,
 		b.path,
 		b.commandArgs(request),
 		[]byte(renderTranscript(request.Messages)),
@@ -104,7 +106,7 @@ func (b *codexCLIBackend) generateStream(ctx context.Context, request Request) (
 	if err != nil {
 		return nil, err
 	}
-	return newCLIChunkStream(ProviderOpenAI, process, &codexCLIStreamParser{model: b.model}), nil
+	return newCLIChunkStream(core.ProviderOpenAI, process, &codexCLIStreamParser{model: b.model}), nil
 }
 
 // codexCLIStreamParser tolerates both Codex CLI shapes: versions that publish
@@ -113,7 +115,7 @@ func (b *codexCLIBackend) generateStream(ctx context.Context, request Request) (
 // an increment, so text is never emitted twice.
 type codexCLIStreamParser struct {
 	model           string
-	result          Response
+	result          core.Response
 	emitted         map[string]int
 	completed       bool
 	hasFinalMessage bool
@@ -170,7 +172,7 @@ func (p *codexCLIStreamParser) record(id string, total int) {
 	p.emitted[id] = total
 }
 
-func (p *codexCLIStreamParser) response() (*Response, error) {
+func (p *codexCLIStreamParser) response() (*core.Response, error) {
 	if err := codexCLIOutcomeError("generate_stream", p.completed, p.hasFinalMessage); err != nil {
 		return nil, err
 	}
@@ -179,8 +181,8 @@ func (p *codexCLIStreamParser) response() (*Response, error) {
 	return &response, nil
 }
 
-func codexCLIUsage(event codexCLIEvent) Usage {
-	return Usage{
+func codexCLIUsage(event codexCLIEvent) core.Usage {
+	return core.Usage{
 		InputTokens:              event.Usage.InputTokens,
 		OutputTokens:             event.Usage.OutputTokens,
 		CachedInputTokens:        event.Usage.CachedInputTokens,
@@ -194,8 +196,8 @@ func codexDeveloperInstructions(system string) string {
 	return "developer_instructions=" + string(encoded)
 }
 
-func parseCodexCLIOutput(output []byte, model string) (*Response, error) {
-	var response Response
+func parseCodexCLIOutput(output []byte, model string) (*core.Response, error) {
+	var response core.Response
 	response.Model = model
 	var completed bool
 	var hasFinalMessage bool
@@ -240,18 +242,18 @@ func parseCodexCLIOutput(output []byte, model string) (*Response, error) {
 }
 
 func codexCLIParseError(operation string, err error) error {
-	return &Error{
-		Provider:  ProviderOpenAI,
-		Flavor:    FlavorCLI,
+	return &core.Error{
+		Provider:  core.ProviderOpenAI,
+		Flavor:    core.FlavorCLI,
 		Operation: operation,
 		Err:       err,
 	}
 }
 
 func codexCLIResultError(operation string, code string, message string) error {
-	return &Error{
-		Provider:  ProviderOpenAI,
-		Flavor:    FlavorCLI,
+	return &core.Error{
+		Provider:  core.ProviderOpenAI,
+		Flavor:    core.FlavorCLI,
 		Operation: operation,
 		Code:      code,
 		Message:   strings.TrimSpace(message),

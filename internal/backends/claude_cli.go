@@ -1,10 +1,12 @@
-package llmwrapper
+package backends
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 type claudeCLIBackend struct {
@@ -30,13 +32,13 @@ func newClaudeCLIBackend(config cliBackendConfig) *claudeCLIBackend {
 }
 
 // These flags target the non-interactive `claude -p` contract described in
-// SPEC.md. Print mode is already single-shot and non-persistent, and the
+// docs/SPEC.md. Print mode is already single-shot and non-persistent, and the
 // default permission mode keeps a headless run from approving agent tool
 // actions. Default tests inject a fake runner and cannot catch a renamed or
-// removed flag, so the opt-in `go test -tags integration` smoke test in
-// backend_cli_integration_test.go launches the real binary to surface flag
-// drift against the installed `claude` version.
-func (b *claudeCLIBackend) generate(ctx context.Context, request Request) (*Response, error) {
+// removed flag, so the opt-in `go test -tags integration` smoke test in the
+// root package's cli_integration_test.go launches the real binary to surface
+// flag drift against the installed `claude` version.
+func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
 	args := []string{
 		"-p",
 		"--output-format", "json",
@@ -50,7 +52,7 @@ func (b *claudeCLIBackend) generate(ctx context.Context, request Request) (*Resp
 
 	stdout, err := executeCLI(
 		ctx,
-		ProviderClaude,
+		core.ProviderClaude,
 		b.path,
 		args,
 		[]byte(renderTranscript(request.Messages)),
@@ -62,11 +64,11 @@ func (b *claudeCLIBackend) generate(ctx context.Context, request Request) (*Resp
 	return parseClaudeCLIOutput(stdout, b.model)
 }
 
-// generateStream builds the same transcript and system flags as the batch path
+// GenerateStream builds the same transcript and system flags as the batch path
 // but asks for incremental stream-json output. Print mode requires --verbose for
 // stream-json, and --include-partial-messages adds the raw Anthropic SSE
 // events the text deltas come from.
-func (b *claudeCLIBackend) generateStream(ctx context.Context, request Request) (chunkStream, error) {
+func (b *claudeCLIBackend) GenerateStream(ctx context.Context, request core.Request) (core.ChunkStream, error) {
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
@@ -82,7 +84,7 @@ func (b *claudeCLIBackend) generateStream(ctx context.Context, request Request) 
 
 	process, err := startCLIStream(
 		ctx,
-		ProviderClaude,
+		core.ProviderClaude,
 		b.path,
 		args,
 		[]byte(renderTranscript(request.Messages)),
@@ -91,7 +93,7 @@ func (b *claudeCLIBackend) generateStream(ctx context.Context, request Request) 
 	if err != nil {
 		return nil, err
 	}
-	return newCLIChunkStream(ProviderClaude, process, &claudeCLIStreamParser{model: b.model}), nil
+	return newCLIChunkStream(core.ProviderClaude, process, &claudeCLIStreamParser{model: b.model}), nil
 }
 
 // claudeCLIStreamLine is the stream-json envelope: partial-message lines carry
@@ -109,7 +111,7 @@ type claudeCLIStreamLine struct {
 
 type claudeCLIStreamParser struct {
 	model  string
-	result *Response
+	result *core.Response
 }
 
 func (p *claudeCLIStreamParser) event(line []byte) (string, error) {
@@ -137,11 +139,11 @@ func (p *claudeCLIStreamParser) event(line []byte) (string, error) {
 	return "", nil
 }
 
-func (p *claudeCLIStreamParser) response() (*Response, error) {
+func (p *claudeCLIStreamParser) response() (*core.Response, error) {
 	if p.result == nil {
-		return nil, &Error{
-			Provider:  ProviderClaude,
-			Flavor:    FlavorCLI,
+		return nil, &core.Error{
+			Provider:  core.ProviderClaude,
+			Flavor:    core.FlavorCLI,
 			Operation: "generate_stream",
 			Code:      "missing_result",
 			Message:   "Claude CLI output did not contain a result",
@@ -150,7 +152,7 @@ func (p *claudeCLIStreamParser) response() (*Response, error) {
 	return p.result, nil
 }
 
-func parseClaudeCLIOutput(stdout []byte, model string) (*Response, error) {
+func parseClaudeCLIOutput(stdout []byte, model string) (*core.Response, error) {
 	var result claudeCLIResult
 	if err := json.Unmarshal(stdout, &result); err != nil {
 		return nil, claudeCLIDecodeError("generate", err)
@@ -159,34 +161,34 @@ func parseClaudeCLIOutput(stdout []byte, model string) (*Response, error) {
 }
 
 func claudeCLIDecodeError(operation string, err error) error {
-	return &Error{
-		Provider:  ProviderClaude,
-		Flavor:    FlavorCLI,
+	return &core.Error{
+		Provider:  core.ProviderClaude,
+		Flavor:    core.FlavorCLI,
 		Operation: operation,
 		Err:       fmt.Errorf("decode Claude CLI output: %w", err),
 	}
 }
 
-func claudeCLIResponse(result claudeCLIResult, model string, operation string) (*Response, error) {
+func claudeCLIResponse(result claudeCLIResult, model string, operation string) (*core.Response, error) {
 	if result.Type != "result" || result.Subtype != "success" || result.IsError {
 		message := result.Result
 		if strings.TrimSpace(message) == "" {
 			message = "Claude CLI returned an unsuccessful result"
 		}
-		return nil, &Error{
-			Provider:  ProviderClaude,
-			Flavor:    FlavorCLI,
+		return nil, &core.Error{
+			Provider:  core.ProviderClaude,
+			Flavor:    core.FlavorCLI,
 			Operation: operation,
 			Code:      claudeCLIErrorCode(result),
 			Message:   message,
 		}
 	}
 
-	return &Response{
+	return &core.Response{
 		ID:    result.SessionID,
 		Model: model,
 		Text:  result.Result,
-		Usage: Usage{
+		Usage: core.Usage{
 			InputTokens:              result.Usage.InputTokens,
 			OutputTokens:             result.Usage.OutputTokens,
 			CachedInputTokens:        result.Usage.CacheReadInputTokens,

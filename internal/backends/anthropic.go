@@ -1,4 +1,4 @@
-package llmwrapper
+package backends
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 type anthropicBackend struct {
@@ -33,7 +35,7 @@ func newAnthropicBackend(config apiBackendConfig) *anthropicBackend {
 	}
 }
 
-func (b *anthropicBackend) generate(ctx context.Context, request Request) (*Response, error) {
+func (b *anthropicBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
 	message, err := b.client.Messages.New(ctx, b.params(request))
 	if err != nil {
 		return nil, normalizeAnthropicError(err)
@@ -41,7 +43,7 @@ func (b *anthropicBackend) generate(ctx context.Context, request Request) (*Resp
 	return anthropicResponse(message), nil
 }
 
-func (b *anthropicBackend) generateStream(ctx context.Context, request Request) (chunkStream, error) {
+func (b *anthropicBackend) GenerateStream(ctx context.Context, request core.Request) (core.ChunkStream, error) {
 	stream := b.client.Messages.NewStreaming(ctx, b.params(request))
 	// NewStreaming records transport and non-2xx failures before any event is
 	// read, so a failed start is reported by GenerateStream rather than Next.
@@ -52,7 +54,7 @@ func (b *anthropicBackend) generateStream(ctx context.Context, request Request) 
 	return &anthropicChunkStream{stream: stream}, nil
 }
 
-func (b *anthropicBackend) params(request Request) anthropic.MessageNewParams {
+func (b *anthropicBackend) params(request core.Request) anthropic.MessageNewParams {
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(b.model),
 		MaxTokens: int64(request.MaxTokens),
@@ -63,7 +65,7 @@ func (b *anthropicBackend) params(request Request) anthropic.MessageNewParams {
 	}
 	for _, message := range request.Messages {
 		block := anthropic.NewTextBlock(message.Text)
-		if message.Role == RoleAssistant {
+		if message.Role == core.RoleAssistant {
 			params.Messages = append(params.Messages, anthropic.NewAssistantMessage(block))
 		} else {
 			params.Messages = append(params.Messages, anthropic.NewUserMessage(block))
@@ -80,33 +82,33 @@ type anthropicChunkStream struct {
 	stopped bool
 }
 
-func (s *anthropicChunkStream) recv() (Chunk, error) {
+func (s *anthropicChunkStream) Recv() (core.Chunk, error) {
 	for s.stream.Next() {
 		event := s.stream.Current()
 		if err := s.message.Accumulate(event); err != nil {
-			return Chunk{}, normalizeAnthropicStreamError(err)
+			return core.Chunk{}, normalizeAnthropicStreamError(err)
 		}
 		if event.Type == "message_stop" {
 			s.stopped = true
 		}
 		if event.Type == "content_block_delta" && event.Delta.Type == "text_delta" {
-			return Chunk{Text: event.Delta.Text}, nil
+			return core.Chunk{Text: event.Delta.Text}, nil
 		}
 	}
 	if err := s.stream.Err(); err != nil {
-		return Chunk{}, normalizeAnthropicStreamError(err)
+		return core.Chunk{}, normalizeAnthropicStreamError(err)
 	}
-	return Chunk{}, errStreamDone
+	return core.Chunk{}, core.ErrStreamDone
 }
 
-// finish requires the terminal message_stop event: a body that ends early is a
+// Finish requires the terminal message_stop event: a body that ends early is a
 // clean EOF to the SDK, so without this check a truncated stream would be
 // reported as a complete response with partial text and stale usage.
-func (s *anthropicChunkStream) finish() (*Response, error) {
+func (s *anthropicChunkStream) Finish() (*core.Response, error) {
 	if !s.stopped {
-		return nil, &Error{
-			Provider:  ProviderClaude,
-			Flavor:    FlavorAPI,
+		return nil, &core.Error{
+			Provider:  core.ProviderClaude,
+			Flavor:    core.FlavorAPI,
 			Operation: "generate_stream",
 			Code:      "missing_message_completion",
 			Message:   "Anthropic stream ended without a completed message",
@@ -115,23 +117,23 @@ func (s *anthropicChunkStream) finish() (*Response, error) {
 	return anthropicResponse(&s.message), nil
 }
 
-func (s *anthropicChunkStream) close() error {
+func (s *anthropicChunkStream) Close() error {
 	return s.stream.Close()
 }
 
-func anthropicResponse(message *anthropic.Message) *Response {
+func anthropicResponse(message *anthropic.Message) *core.Response {
 	var text strings.Builder
 	for _, block := range message.Content {
 		if block.Type == "text" {
 			text.WriteString(block.Text)
 		}
 	}
-	return &Response{
+	return &core.Response{
 		ID:               message.ID,
 		Model:            string(message.Model),
 		Text:             text.String(),
 		CompletionReason: normalizeAnthropicCompletionReason(message.StopReason),
-		Usage: Usage{
+		Usage: core.Usage{
 			InputTokens:              int(message.Usage.InputTokens),
 			OutputTokens:             int(message.Usage.OutputTokens),
 			CachedInputTokens:        int(message.Usage.CacheReadInputTokens),
@@ -149,9 +151,9 @@ func normalizeAnthropicStreamError(err error) error {
 }
 
 func normalizeAnthropicOperationError(err error, operation string) error {
-	normalized := &Error{
-		Provider:  ProviderClaude,
-		Flavor:    FlavorAPI,
+	normalized := &core.Error{
+		Provider:  core.ProviderClaude,
+		Flavor:    core.FlavorAPI,
 		Operation: operation,
 		Err:       err,
 	}
@@ -171,14 +173,14 @@ func normalizeAnthropicOperationError(err error, operation string) error {
 	return normalized
 }
 
-func normalizeAnthropicCompletionReason(reason anthropic.StopReason) CompletionReason {
+func normalizeAnthropicCompletionReason(reason anthropic.StopReason) core.CompletionReason {
 	switch reason {
 	case anthropic.StopReasonEndTurn, anthropic.StopReasonStopSequence:
-		return CompletionReasonStop
+		return core.CompletionReasonStop
 	case anthropic.StopReasonMaxTokens:
-		return CompletionReasonMaxTokens
+		return core.CompletionReasonMaxTokens
 	case anthropic.StopReasonRefusal:
-		return CompletionReasonRefusal
+		return core.CompletionReasonRefusal
 	default:
 		return ""
 	}

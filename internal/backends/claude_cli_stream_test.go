@@ -1,10 +1,12 @@
-package llmwrapper
+package backends
 
 import (
 	"context"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 // claudeStreamJSONLines mirrors `claude -p --output-format stream-json
@@ -29,16 +31,16 @@ func TestClaudeCLIStreamCommand(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		config     Config
-		request    Request
+		config     core.Config
+		request    core.Request
 		wantPath   string
 		wantArgs   []string
 		wantPrompt string
 	}{
 		{
 			name:     "single user message",
-			config:   Config{Provider: ProviderClaude, Flavor: FlavorCLI, Model: "claude-test"},
-			request:  Request{MaxTokens: 32, Messages: []Message{User("Hello from stdin")}},
+			config:   core.Config{Provider: core.ProviderClaude, Flavor: core.FlavorCLI, Model: "claude-test"},
+			request:  core.Request{MaxTokens: 32, Messages: []core.Message{core.User("Hello from stdin")}},
 			wantPath: "claude",
 			wantArgs: []string{
 				"-p", "--output-format", "stream-json", "--include-partial-messages", "--verbose",
@@ -48,17 +50,17 @@ func TestClaudeCLIStreamCommand(t *testing.T) {
 		},
 		{
 			name: "system and multi turn with custom CLI settings",
-			config: Config{
-				Provider: ProviderClaude,
-				Flavor:   FlavorCLI,
+			config: core.Config{
+				Provider: core.ProviderClaude,
+				Flavor:   core.FlavorCLI,
 				Model:    "claude-test",
 				CLIPath:  "/opt/bin/claude-custom",
 				CLIArgs:  []string{"--permission-mode", "plan"},
 			},
-			request: Request{
+			request: core.Request{
 				System:    "Be concise.",
 				MaxTokens: 32,
-				Messages:  []Message{User("First"), Assistant("Second"), User("Third")},
+				Messages:  []core.Message{core.User("First"), core.Assistant("Second"), core.User("Third")},
 			},
 			wantPath: "/opt/bin/claude-custom",
 			wantArgs: []string{
@@ -95,15 +97,15 @@ func TestClaudeCLIStreamSuccess(t *testing.T) {
 	t.Parallel()
 
 	runner := &fakeStreamingRunner{lines: claudeStreamJSONLines()}
-	client := newCLIStreamClient(Config{
-		Provider: ProviderClaude,
-		Flavor:   FlavorCLI,
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderClaude,
+		Flavor:   core.FlavorCLI,
 		Model:    "claude-test",
 	}, runner.run)
 
-	stream, err := client.GenerateStream(context.Background(), Request{
+	stream, err := client.GenerateStream(context.Background(), core.Request{
 		MaxTokens: 32,
-		Messages:  []Message{User("Hello")},
+		Messages:  []core.Message{core.User("Hello")},
 	})
 	if err != nil {
 		t.Fatalf("GenerateStream(): %v", err)
@@ -120,10 +122,10 @@ func TestClaudeCLIStreamSuccess(t *testing.T) {
 	if response.ID != "session-123" || response.Model != "claude-test" || response.Text != "Hello, world" {
 		t.Fatalf("response = %+v", response)
 	}
-	if response.Provider != ProviderClaude || response.Flavor != FlavorCLI {
+	if response.Provider != core.ProviderClaude || response.Flavor != core.FlavorCLI {
 		t.Fatalf("response target = %s/%s", response.Provider, response.Flavor)
 	}
-	wantUsage := Usage{InputTokens: 11, OutputTokens: 7, CachedInputTokens: 5, CacheCreationInputTokens: 3}
+	wantUsage := core.Usage{InputTokens: 11, OutputTokens: 7, CachedInputTokens: 5, CacheCreationInputTokens: 3}
 	if response.Usage != wantUsage {
 		t.Fatalf("usage = %+v, want %+v", response.Usage, wantUsage)
 	}
@@ -139,15 +141,15 @@ func TestClaudeCLIStreamDeliversChunksBeforeExit(t *testing.T) {
 		holdFrom: 4,
 		gate:     make(chan struct{}),
 	}
-	client := newCLIStreamClient(Config{
-		Provider: ProviderClaude,
-		Flavor:   FlavorCLI,
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderClaude,
+		Flavor:   core.FlavorCLI,
 		Model:    "claude-test",
 	}, runner.run)
 
-	stream, err := client.GenerateStream(context.Background(), Request{
+	stream, err := client.GenerateStream(context.Background(), core.Request{
 		MaxTokens: 32,
-		Messages:  []Message{User("Hello")},
+		Messages:  []core.Message{core.User("Hello")},
 	})
 	if err != nil {
 		t.Fatalf("GenerateStream(): %v", err)
@@ -185,8 +187,8 @@ func TestClaudeCLIStreamErrors(t *testing.T) {
 	}{
 		{
 			name:       "missing executable",
-			runner:     &fakeStreamingRunner{startErr: ErrExecutableNotFound},
-			wantIs:     ErrExecutableNotFound,
+			runner:     &fakeStreamingRunner{startErr: core.ErrExecutableNotFound},
+			wantIs:     core.ErrExecutableNotFound,
 			startFails: true,
 		},
 		{
@@ -225,15 +227,15 @@ func TestClaudeCLIStreamErrors(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			client := newCLIStreamClient(Config{
-				Provider: ProviderClaude,
-				Flavor:   FlavorCLI,
+			client := newCLIStreamClient(core.Config{
+				Provider: core.ProviderClaude,
+				Flavor:   core.FlavorCLI,
 				Model:    "claude-test",
 			}, test.runner.run)
 
-			stream, err := client.GenerateStream(context.Background(), Request{
+			stream, err := client.GenerateStream(context.Background(), core.Request{
 				MaxTokens: 32,
-				Messages:  []Message{User("Hello")},
+				Messages:  []core.Message{core.User("Hello")},
 			})
 			if test.startFails {
 				if stream != nil {
@@ -247,11 +249,11 @@ func TestClaudeCLIStreamErrors(t *testing.T) {
 				_, err, _ = collectStream(t, stream)
 			}
 
-			var target *Error
+			var target *core.Error
 			if !errors.As(err, &target) {
-				t.Fatalf("stream error = %T %v, want *Error", err, err)
+				t.Fatalf("stream error = %T %v, want *core.Error", err, err)
 			}
-			if target.Provider != ProviderClaude || target.Flavor != FlavorCLI || target.Operation != "generate_stream" {
+			if target.Provider != core.ProviderClaude || target.Flavor != core.FlavorCLI || target.Operation != "generate_stream" {
 				t.Fatalf("error context = %+v", target)
 			}
 			if target.Status != test.wantStatus || target.Code != test.wantCode {
@@ -272,15 +274,15 @@ func TestClaudeCLIStreamCloseTerminatesRunner(t *testing.T) {
 		holdFrom: 4,
 		gate:     make(chan struct{}),
 	}
-	client := newCLIStreamClient(Config{
-		Provider: ProviderClaude,
-		Flavor:   FlavorCLI,
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderClaude,
+		Flavor:   core.FlavorCLI,
 		Model:    "claude-test",
 	}, runner.run)
 
-	stream, err := client.GenerateStream(context.Background(), Request{
+	stream, err := client.GenerateStream(context.Background(), core.Request{
 		MaxTokens: 32,
-		Messages:  []Message{User("Hello")},
+		Messages:  []core.Message{core.User("Hello")},
 	})
 	if err != nil {
 		t.Fatalf("GenerateStream(): %v", err)
@@ -332,9 +334,9 @@ func TestClaudeCLIStreamMalformedResultLine(t *testing.T) {
 			t.Parallel()
 
 			runner := &fakeStreamingRunner{lines: append(claudeStreamJSONLines()[:5], test.result)}
-			client := newCLIStreamClient(Config{
-				Provider: ProviderClaude,
-				Flavor:   FlavorCLI,
+			client := newCLIStreamClient(core.Config{
+				Provider: core.ProviderClaude,
+				Flavor:   core.FlavorCLI,
 				Model:    "claude-test",
 			}, runner.run)
 
@@ -345,11 +347,11 @@ func TestClaudeCLIStreamMalformedResultLine(t *testing.T) {
 			defer stream.Close()
 
 			_, err, _ = collectStream(t, stream)
-			var target *Error
+			var target *core.Error
 			if !errors.As(err, &target) {
-				t.Fatalf("stream error = %T %v, want *Error", err, err)
+				t.Fatalf("stream error = %T %v, want *core.Error", err, err)
 			}
-			if target.Provider != ProviderClaude || target.Flavor != FlavorCLI || target.Operation != "generate_stream" {
+			if target.Provider != core.ProviderClaude || target.Flavor != core.FlavorCLI || target.Operation != "generate_stream" {
 				t.Fatalf("error context = %+v", target)
 			}
 			if target.Code != test.wantCode {

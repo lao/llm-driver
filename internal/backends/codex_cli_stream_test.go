@@ -1,10 +1,12 @@
-package llmwrapper
+package backends
 
 import (
 	"context"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 const (
@@ -34,10 +36,10 @@ func codexStreamCompletedOnlyLines() []string {
 	return []string{codexStreamThread, codexStreamCompleted, codexStreamTurn}
 }
 
-func newCodexStreamClient(runner streamingCommandRunner) *Client {
-	return newCLIStreamClient(Config{
-		Provider: ProviderOpenAI,
-		Flavor:   FlavorCLI,
+func newCodexStreamClient(runner streamingCommandRunner) *streamClient {
+	return newCLIStreamClient(core.Config{
+		Provider: core.ProviderOpenAI,
+		Flavor:   core.FlavorCLI,
 		Model:    "codex-test",
 	}, runner)
 }
@@ -46,18 +48,18 @@ func TestCodexCLIStreamCommandMatchesBatch(t *testing.T) {
 	t.Parallel()
 
 	runner := &fakeStreamingRunner{lines: codexStreamCompletedOnlyLines()}
-	client := newCLIStreamClient(Config{
-		Provider: ProviderOpenAI,
-		Flavor:   FlavorCLI,
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderOpenAI,
+		Flavor:   core.FlavorCLI,
 		Model:    "codex-test",
 		CLIPath:  "/opt/bin/codex-custom",
 		CLIArgs:  []string{"--full-auto"},
 	}, runner.run)
 
-	stream, err := client.GenerateStream(context.Background(), Request{
+	stream, err := client.GenerateStream(context.Background(), core.Request{
 		System:    "Be concise.",
 		MaxTokens: 32,
-		Messages:  []Message{User("First"), Assistant("Second"), User("Third")},
+		Messages:  []core.Message{core.User("First"), core.Assistant("Second"), core.User("Third")},
 	})
 	if err != nil {
 		t.Fatalf("GenerateStream(): %v", err)
@@ -115,9 +117,9 @@ func TestCodexCLIStreamChunkSources(t *testing.T) {
 
 			runner := &fakeStreamingRunner{lines: test.lines}
 			client := newCodexStreamClient(runner.run)
-			stream, err := client.GenerateStream(context.Background(), Request{
+			stream, err := client.GenerateStream(context.Background(), core.Request{
 				MaxTokens: 32,
-				Messages:  []Message{User("Hello")},
+				Messages:  []core.Message{core.User("Hello")},
 			})
 			if err != nil {
 				t.Fatalf("GenerateStream(): %v", err)
@@ -137,10 +139,10 @@ func TestCodexCLIStreamChunkSources(t *testing.T) {
 			if response.ID != "thread-123" || response.Model != "codex-test" {
 				t.Fatalf("response = %+v", response)
 			}
-			if response.Provider != ProviderOpenAI || response.Flavor != FlavorCLI {
+			if response.Provider != core.ProviderOpenAI || response.Flavor != core.FlavorCLI {
 				t.Fatalf("response target = %s/%s", response.Provider, response.Flavor)
 			}
-			wantUsage := Usage{
+			wantUsage := core.Usage{
 				InputTokens:              11,
 				OutputTokens:             7,
 				CachedInputTokens:        5,
@@ -163,9 +165,9 @@ func TestCodexCLIStreamDeliversChunksBeforeExit(t *testing.T) {
 		gate:     make(chan struct{}),
 	}
 	client := newCodexStreamClient(runner.run)
-	stream, err := client.GenerateStream(context.Background(), Request{
+	stream, err := client.GenerateStream(context.Background(), core.Request{
 		MaxTokens: 32,
-		Messages:  []Message{User("Hello")},
+		Messages:  []core.Message{core.User("Hello")},
 	})
 	if err != nil {
 		t.Fatalf("GenerateStream(): %v", err)
@@ -197,7 +199,7 @@ func TestCodexCLIStreamErrors(t *testing.T) {
 	}{
 		{
 			name:       "missing executable",
-			runner:     &fakeStreamingRunner{startErr: ErrExecutableNotFound},
+			runner:     &fakeStreamingRunner{startErr: core.ErrExecutableNotFound},
 			startFails: true,
 		},
 		{
@@ -258,9 +260,9 @@ func TestCodexCLIStreamErrors(t *testing.T) {
 			t.Parallel()
 
 			client := newCodexStreamClient(test.runner.run)
-			stream, err := client.GenerateStream(context.Background(), Request{
+			stream, err := client.GenerateStream(context.Background(), core.Request{
 				MaxTokens: 32,
-				Messages:  []Message{User("Hello")},
+				Messages:  []core.Message{core.User("Hello")},
 			})
 			if test.startFails {
 				if stream != nil {
@@ -274,11 +276,11 @@ func TestCodexCLIStreamErrors(t *testing.T) {
 				_, err, _ = collectStream(t, stream)
 			}
 
-			var target *Error
+			var target *core.Error
 			if !errors.As(err, &target) {
-				t.Fatalf("stream error = %T %v, want *Error", err, err)
+				t.Fatalf("stream error = %T %v, want *core.Error", err, err)
 			}
-			if target.Provider != ProviderOpenAI || target.Flavor != FlavorCLI || target.Operation != "generate_stream" {
+			if target.Provider != core.ProviderOpenAI || target.Flavor != core.FlavorCLI || target.Operation != "generate_stream" {
 				t.Fatalf("error context = %+v", target)
 			}
 			if target.Status != test.wantStatus || target.Code != test.wantCode {
@@ -313,9 +315,9 @@ func TestCodexCLIStreamFailureWithoutMessage(t *testing.T) {
 			defer stream.Close()
 
 			_, err, _ = collectStream(t, stream)
-			var target *Error
+			var target *core.Error
 			if !errors.As(err, &target) {
-				t.Fatalf("stream error = %T %v, want *Error", err, err)
+				t.Fatalf("stream error = %T %v, want *core.Error", err, err)
 			}
 			if target.Code != test.wantCode {
 				t.Fatalf("code = %q, want %q", target.Code, test.wantCode)

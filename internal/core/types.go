@@ -1,4 +1,4 @@
-package llmwrapper
+package core
 
 import (
 	"fmt"
@@ -76,6 +76,12 @@ type Response struct {
 	Provider Provider `json:"provider"`
 	// Flavor identifies the selected transport flavor.
 	Flavor Flavor `json:"flavor"`
+}
+
+// Chunk is one incremental piece of response text.
+type Chunk struct {
+	// Text is the incremental response text; it is never empty.
+	Text string
 }
 
 // User builds a user-role text message.

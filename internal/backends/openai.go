@@ -1,4 +1,4 @@
-package llmwrapper
+package backends
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/ssestream"
 	"github.com/openai/openai-go/v3/responses"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 type openAIBackend struct {
@@ -33,7 +35,7 @@ func newOpenAIBackend(config apiBackendConfig) *openAIBackend {
 	}
 }
 
-func (b *openAIBackend) generate(ctx context.Context, request Request) (*Response, error) {
+func (b *openAIBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
 	response, err := b.client.Responses.New(ctx, b.params(request))
 	if err != nil {
 		return nil, normalizeOpenAIError(err, "generate")
@@ -44,7 +46,7 @@ func (b *openAIBackend) generate(ctx context.Context, request Request) (*Respons
 	return openAIResponse(response), nil
 }
 
-func (b *openAIBackend) generateStream(ctx context.Context, request Request) (chunkStream, error) {
+func (b *openAIBackend) GenerateStream(ctx context.Context, request core.Request) (core.ChunkStream, error) {
 	stream := b.client.Responses.NewStreaming(ctx, b.params(request))
 	// NewStreaming records transport and non-2xx failures before any event is
 	// read, so a failed start is reported by GenerateStream rather than Next.
@@ -55,7 +57,7 @@ func (b *openAIBackend) generateStream(ctx context.Context, request Request) (ch
 	return &openAIChunkStream{stream: stream}, nil
 }
 
-func (b *openAIBackend) params(request Request) responses.ResponseNewParams {
+func (b *openAIBackend) params(request core.Request) responses.ResponseNewParams {
 	input := make(responses.ResponseInputParam, 0, len(request.Messages))
 	for _, message := range request.Messages {
 		content := responses.ResponseInputMessageContentListParam{
@@ -65,7 +67,7 @@ func (b *openAIBackend) params(request Request) responses.ResponseNewParams {
 			content,
 			responses.EasyInputMessageRole(message.Role),
 		)
-		if message.Role == RoleAssistant {
+		if message.Role == core.RoleAssistant {
 			// Preserve the completed-answer phase so current Codex models keep
 			// full follow-up quality on prior assistant turns.
 			item.OfMessage.Phase = responses.EasyInputMessagePhaseFinalAnswer
@@ -93,30 +95,30 @@ type openAIChunkStream struct {
 	completed *responses.Response
 }
 
-func (s *openAIChunkStream) recv() (Chunk, error) {
+func (s *openAIChunkStream) Recv() (core.Chunk, error) {
 	for s.stream.Next() {
 		event := s.stream.Current()
 		switch event.Type {
 		case "response.output_text.delta", "response.refusal.delta":
-			return Chunk{Text: event.Delta}, nil
+			return core.Chunk{Text: event.Delta}, nil
 		case "response.completed", "response.failed", "response.incomplete":
 			response := event.Response
 			s.completed = &response
 		case "error":
-			return Chunk{}, openAIStreamEventError(event)
+			return core.Chunk{}, openAIStreamEventError(event)
 		}
 	}
 	if err := s.stream.Err(); err != nil {
-		return Chunk{}, normalizeOpenAIError(err, "generate_stream")
+		return core.Chunk{}, normalizeOpenAIError(err, "generate_stream")
 	}
-	return Chunk{}, errStreamDone
+	return core.Chunk{}, core.ErrStreamDone
 }
 
-func (s *openAIChunkStream) finish() (*Response, error) {
+func (s *openAIChunkStream) Finish() (*core.Response, error) {
 	if s.completed == nil {
-		return nil, &Error{
-			Provider:  ProviderOpenAI,
-			Flavor:    FlavorAPI,
+		return nil, &core.Error{
+			Provider:  core.ProviderOpenAI,
+			Flavor:    core.FlavorAPI,
 			Operation: "generate_stream",
 			Code:      "missing_response_completion",
 			Message:   "OpenAI stream ended without a completed response",
@@ -128,7 +130,7 @@ func (s *openAIChunkStream) finish() (*Response, error) {
 	return openAIResponse(s.completed), nil
 }
 
-func (s *openAIChunkStream) close() error {
+func (s *openAIChunkStream) Close() error {
 	return s.stream.Close()
 }
 
@@ -141,22 +143,22 @@ func openAIStreamEventError(event responses.ResponseStreamEventUnion) error {
 	if message == "" {
 		message = "OpenAI stream reported an error"
 	}
-	return &Error{
-		Provider:  ProviderOpenAI,
-		Flavor:    FlavorAPI,
+	return &core.Error{
+		Provider:  core.ProviderOpenAI,
+		Flavor:    core.FlavorAPI,
 		Operation: "generate_stream",
 		Code:      code,
 		Message:   message,
 	}
 }
 
-func openAIResponse(response *responses.Response) *Response {
-	return &Response{
+func openAIResponse(response *responses.Response) *core.Response {
+	return &core.Response{
 		ID:               response.ID,
 		Model:            string(response.Model),
 		Text:             openAIResponseText(response),
 		CompletionReason: openAICompletionReason(response),
-		Usage: Usage{
+		Usage: core.Usage{
 			InputTokens:              int(response.Usage.InputTokens),
 			OutputTokens:             int(response.Usage.OutputTokens),
 			CachedInputTokens:        int(response.Usage.InputTokensDetails.CachedTokens),
@@ -185,9 +187,9 @@ func validateOpenAIResponse(response *responses.Response, operation string) erro
 		if code == "" {
 			code = "unknown_status"
 		}
-		return &Error{
-			Provider:  ProviderOpenAI,
-			Flavor:    FlavorAPI,
+		return &core.Error{
+			Provider:  core.ProviderOpenAI,
+			Flavor:    core.FlavorAPI,
 			Operation: operation,
 			Code:      code,
 			Message:   message,
@@ -212,25 +214,25 @@ func openAIResponseText(response *responses.Response) string {
 	return text.String()
 }
 
-func openAICompletionReason(response *responses.Response) CompletionReason {
+func openAICompletionReason(response *responses.Response) core.CompletionReason {
 	if response.Status == responses.ResponseStatusIncomplete &&
 		response.IncompleteDetails.Reason == "max_output_tokens" {
-		return CompletionReasonMaxTokens
+		return core.CompletionReasonMaxTokens
 	}
 	for _, item := range response.Output {
 		for _, content := range item.Content {
 			if content.Type == "refusal" {
-				return CompletionReasonRefusal
+				return core.CompletionReasonRefusal
 			}
 		}
 	}
-	return CompletionReasonStop
+	return core.CompletionReasonStop
 }
 
 func normalizeOpenAIError(err error, operation string) error {
-	normalized := &Error{
-		Provider:  ProviderOpenAI,
-		Flavor:    FlavorAPI,
+	normalized := &core.Error{
+		Provider:  core.ProviderOpenAI,
+		Flavor:    core.FlavorAPI,
 		Operation: operation,
 		Err:       err,
 	}

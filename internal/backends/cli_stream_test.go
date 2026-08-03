@@ -1,4 +1,4 @@
-package llmwrapper
+package backends
 
 import (
 	"bytes"
@@ -9,12 +9,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 // fakeStreamingRunner replays scripted stdout lines through a pipe so streaming
@@ -112,29 +115,6 @@ func (r *fakeStreamingRunner) assertCall(t *testing.T, name string, args []strin
 	}
 }
 
-// newCLIStreamClient wires a CLI backend to a fake streaming runner. It skips
-// New so tests can inject the runner without a public seam.
-func newCLIStreamClient(config Config, runner streamingCommandRunner) *Client {
-	cliConfig := cliBackendConfig{
-		model:        config.Model,
-		path:         config.CLIPath,
-		args:         config.CLIArgs,
-		streamRunner: runner,
-	}
-	var target backend
-	if config.Provider == ProviderClaude {
-		target = newClaudeCLIBackend(cliConfig)
-	} else {
-		target = newCodexCLIBackend(cliConfig)
-	}
-	return &Client{
-		provider: config.Provider,
-		flavor:   FlavorCLI,
-		model:    config.Model,
-		backend:  target,
-	}
-}
-
 func TestStreamingCommandMissingExecutable(t *testing.T) {
 	t.Parallel()
 
@@ -144,8 +124,8 @@ func TestStreamingCommandMissingExecutable(t *testing.T) {
 		nil,
 		nil,
 	)
-	if !errors.Is(err, ErrExecutableNotFound) {
-		t.Fatalf("defaultStreamingCommandRunner() error = %v, want ErrExecutableNotFound", err)
+	if !errors.Is(err, core.ErrExecutableNotFound) {
+		t.Fatalf("defaultStreamingCommandRunner() error = %v, want core.ErrExecutableNotFound", err)
 	}
 }
 
@@ -280,16 +260,16 @@ func TestCLIChunkStreamRejectsOversizedLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run(): %v", err)
 	}
-	stream := newCLIChunkStream(ProviderClaude, process, &countingEventParser{})
-	defer stream.close()
+	stream := newCLIChunkStream(core.ProviderClaude, process, &countingEventParser{})
+	defer stream.Close()
 
-	_, err = stream.recv()
+	_, err = stream.Recv()
 	if !errors.Is(err, errCLIOutputTooLarge) {
 		t.Fatalf("recv() error = %v, want errCLIOutputTooLarge", err)
 	}
-	var target *Error
-	if !errors.As(err, &target) || target.Operation != "generate_stream" || target.Provider != ProviderClaude {
-		t.Fatalf("recv() error = %#v, want normalized *Error", err)
+	var target *core.Error
+	if !errors.As(err, &target) || target.Operation != "generate_stream" || target.Provider != core.ProviderClaude {
+		t.Fatalf("recv() error = %#v, want normalized *core.Error", err)
 	}
 }
 
@@ -341,20 +321,20 @@ func TestCLIChunkStreamBoundsDrainAfterFailure(t *testing.T) {
 	// able to hold recv open: the post-failure drain is bounded like every other
 	// read on this path.
 	process := newEndlessCLIProcess("not-json")
-	stream := newCLIChunkStream(ProviderClaude, process, &claudeCLIStreamParser{model: "claude-test"})
-	defer stream.close()
+	stream := newCLIChunkStream(core.ProviderClaude, process, &claudeCLIStreamParser{model: "claude-test"})
+	defer stream.Close()
 
 	failed := make(chan error, 1)
 	go func() {
-		_, err := stream.recv()
+		_, err := stream.Recv()
 		failed <- err
 	}()
 
 	select {
 	case err := <-failed:
-		var target *Error
+		var target *core.Error
 		if !errors.As(err, &target) || target.Operation != "generate_stream" {
-			t.Fatalf("recv() error = %#v, want normalized *Error", err)
+			t.Fatalf("recv() error = %#v, want normalized *core.Error", err)
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("recv() did not return: the drain after a failed line is unbounded")
@@ -373,16 +353,16 @@ func TestCLIChunkStreamReportsNonzeroExit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run(): %v", err)
 	}
-	stream := newCLIChunkStream(ProviderOpenAI, process, &countingEventParser{})
-	defer stream.close()
+	stream := newCLIChunkStream(core.ProviderOpenAI, process, &countingEventParser{})
+	defer stream.Close()
 
-	if _, err := stream.recv(); err != nil {
+	if _, err := stream.Recv(); err != nil {
 		t.Fatalf("first recv(): %v", err)
 	}
-	_, err = stream.recv()
-	var target *Error
+	_, err = stream.Recv()
+	var target *core.Error
 	if !errors.As(err, &target) {
-		t.Fatalf("recv() error = %T %v, want *Error", err, err)
+		t.Fatalf("recv() error = %T %v, want *core.Error", err, err)
 	}
 	if target.Status != 17 || target.Message != "authentication failed" {
 		t.Fatalf("error = %+v", target)
@@ -397,8 +377,8 @@ func (p *countingEventParser) event(line []byte) (string, error) {
 	return string(line), nil
 }
 
-func (p *countingEventParser) response() (*Response, error) {
-	return &Response{}, nil
+func (p *countingEventParser) response() (*core.Response, error) {
+	return &core.Response{}, nil
 }
 
 func readHelperPID(t *testing.T, path string) int {
@@ -466,13 +446,13 @@ func TestCLIChunkStreamSkipsBlankLines(t *testing.T) {
 		t.Fatalf("run(): %v", err)
 	}
 	parser := &countingEventParser{}
-	stream := newCLIChunkStream(ProviderClaude, process, parser)
-	defer stream.close()
+	stream := newCLIChunkStream(core.ProviderClaude, process, parser)
+	defer stream.Close()
 
 	var chunks []string
 	for {
-		chunk, err := stream.recv()
-		if errors.Is(err, errStreamDone) {
+		chunk, err := stream.Recv()
+		if errors.Is(err, core.ErrStreamDone) {
 			break
 		}
 		if err != nil {
@@ -498,9 +478,9 @@ func TestCLIStreamCancellationIsNormalized(t *testing.T) {
 		stderr:  []byte("interrupted\n"),
 		waitErr: context.Canceled,
 	}
-	client := newCLIStreamClient(Config{
-		Provider: ProviderClaude,
-		Flavor:   FlavorCLI,
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderClaude,
+		Flavor:   core.FlavorCLI,
 		Model:    "claude-test",
 	}, runner.run)
 
@@ -517,11 +497,11 @@ func TestCLIStreamCancellationIsNormalized(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("stream error = %v, want context.Canceled", err)
 	}
-	var target *Error
+	var target *core.Error
 	if !errors.As(err, &target) {
-		t.Fatalf("stream error = %T %v, want *Error", err, err)
+		t.Fatalf("stream error = %T %v, want *core.Error", err, err)
 	}
-	if target.Provider != ProviderClaude || target.Flavor != FlavorCLI || target.Operation != "generate_stream" {
+	if target.Provider != core.ProviderClaude || target.Flavor != core.FlavorCLI || target.Operation != "generate_stream" {
 		t.Fatalf("error context = %+v", target)
 	}
 	if target.Message != "interrupted" {
@@ -540,16 +520,16 @@ func TestCLIChunkStreamNonzeroExitWithoutStderr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run(): %v", err)
 	}
-	stream := newCLIChunkStream(ProviderOpenAI, process, &countingEventParser{})
-	defer stream.close()
+	stream := newCLIChunkStream(core.ProviderOpenAI, process, &countingEventParser{})
+	defer stream.Close()
 
-	if _, err := stream.recv(); err != nil {
+	if _, err := stream.Recv(); err != nil {
 		t.Fatalf("first recv(): %v", err)
 	}
-	_, err = stream.recv()
-	var target *Error
+	_, err = stream.Recv()
+	var target *core.Error
 	if !errors.As(err, &target) {
-		t.Fatalf("recv() error = %T %v, want *Error", err, err)
+		t.Fatalf("recv() error = %T %v, want *core.Error", err, err)
 	}
 	if target.Status != 2 {
 		t.Fatalf("status = %d, want 2", target.Status)
@@ -568,16 +548,16 @@ func TestCLIChunkStreamRepeatsFailureAfterError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run(): %v", err)
 	}
-	stream := newCLIChunkStream(ProviderClaude, process, &claudeCLIStreamParser{model: "claude-test"})
-	defer stream.close()
+	stream := newCLIChunkStream(core.ProviderClaude, process, &claudeCLIStreamParser{model: "claude-test"})
+	defer stream.Close()
 
-	_, first := stream.recv()
+	_, first := stream.Recv()
 	if first == nil {
 		t.Fatal("recv() error = nil for a malformed line")
 	}
 	// A stream that has already failed keeps reporting the same failure instead
 	// of resuming into later output or waiting on the process a second time.
-	_, second := stream.recv()
+	_, second := stream.Recv()
 	if second != first {
 		t.Fatalf("second recv() error = %v, want the recorded failure %v", second, first)
 	}
@@ -602,7 +582,7 @@ func TestStreamingCommandStartFailureIsReported(t *testing.T) {
 	if process != nil {
 		t.Fatalf("process = %v, want nil after a failed start", process)
 	}
-	if errors.Is(err, ErrExecutableNotFound) {
+	if errors.Is(err, core.ErrExecutableNotFound) {
 		t.Fatalf("error = %v, want a start failure rather than a lookup failure", err)
 	}
 }
@@ -639,5 +619,83 @@ func TestStreamingCommandReportsCleanExit(t *testing.T) {
 	// wait is documented as safe to call more than once.
 	if _, _, waitErr := process.wait(); waitErr != nil {
 		t.Fatalf("second wait() error = %v", waitErr)
+	}
+}
+
+func TestStreamCloseIsSafeConcurrentlyWithNext(t *testing.T) {
+	t.Parallel()
+
+	// The runner holds output after the first chunk, so Next is genuinely
+	// blocked when Close runs.
+	runner := &fakeStreamingRunner{
+		lines:    claudeStreamJSONLines(),
+		holdFrom: 4,
+		gate:     make(chan struct{}),
+	}
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderClaude,
+		Flavor:   core.FlavorCLI,
+		Model:    "claude-test",
+	}, runner.run)
+
+	stream, err := client.GenerateStream(context.Background(), streamRequest())
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	if !stream.Next() {
+		t.Fatalf("Next() = false: %v", stream.Err())
+	}
+
+	advanced := make(chan bool, 1)
+	go func() { advanced <- stream.Next() }()
+
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close(): %v", err)
+	}
+	select {
+	case got := <-advanced:
+		if got {
+			t.Fatal("Next() = true after a concurrent Close()")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Next() did not return after Close()")
+	}
+}
+
+func TestStreamCloseLeavesNoGoroutines(t *testing.T) {
+	// Not parallel: the goroutine count is process-wide.
+	baseline := runtime.NumGoroutine()
+
+	for range 20 {
+		runner := &fakeStreamingRunner{
+			lines:    claudeStreamJSONLines(),
+			holdFrom: 4,
+			gate:     make(chan struct{}),
+		}
+		client := newCLIStreamClient(core.Config{
+			Provider: core.ProviderClaude,
+			Flavor:   core.FlavorCLI,
+			Model:    "claude-test",
+		}, runner.run)
+
+		stream, err := client.GenerateStream(context.Background(), streamRequest())
+		if err != nil {
+			t.Fatalf("GenerateStream(): %v", err)
+		}
+		if !stream.Next() {
+			t.Fatalf("Next() = false: %v", stream.Err())
+		}
+		// Abandon the stream mid-flight; Close must release everything it started.
+		if err := stream.Close(); err != nil {
+			t.Fatalf("Close(): %v", err)
+		}
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for runtime.NumGoroutine() > baseline+2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines = %d, baseline %d", runtime.NumGoroutine(), baseline)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

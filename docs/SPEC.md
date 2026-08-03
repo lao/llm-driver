@@ -22,6 +22,11 @@ granularity may differ, and that difference is documented, not hidden.
 The base non-streaming API (`New`, `Generate`, `Request`, `Response`, `Error`)
 is stable and must not change shape or behavior.
 
+The public types now live in `internal/core` with root-package aliases keeping
+the API surface unchanged. The committed module path remains
+`github.com/lao/llmwrapper`, matching the existing repository; no compatibility
+package or deprecated aliases for the former package are included.
+
 ### Public API additions
 
 The library keeps owning all public types. Neither provider SDK leaks through
@@ -177,24 +182,33 @@ Default tests must not contact a real provider or start a real agent CLI.
 New/changed files only; everything else is untouched:
 
 ```text
-stream.go                       Stream, Chunk, accumulation, GenerateStream plumbing
-backend.go                      backend interface gains a streaming method
-backend_anthropic.go            + Messages streaming adapter
-backend_openai.go               + Responses streaming adapter
-backend_claude_cli.go           + stream-json incremental parser
-backend_codex_cli.go            + incremental JSONL event streaming
-backend_cli.go                  + streaming subprocess runner (pipe-based)
+go.mod / go.sum                 module metadata and pinned SDKs
+doc.go                          package documentation and short example
+client.go                       Client, New, target selection, Generate
+stream.go                       Stream, GenerateStream, accumulation plumbing
+llmwrapper.go                   public aliases for the internal/core types (incl. Chunk)
+*_test.go                       contract and adapter tests via the public API
 stream_test.go                  Stream contract and accumulation tests
-*_test.go                       per-adapter streaming tests beside existing ones
-contract_test.go                + streaming contract cases across all four targets
-examples/switchable/main.go     + --stream flag
-README.md / doc.go              streaming docs and caveats
-SPEC.md                         this spec
-tasks/plan.md / tasks/todo.md   implementation plan and checklist
+internal/core/config.go         Config and provider/flavor validation
+internal/core/types.go          neutral request, response, message, usage, chunk types
+internal/core/errors.go         normalized Error and sentinel errors
+internal/core/backend.go        Backend interface, ChunkStream, CommandRunner
+internal/backends/build.go      backend construction from a Config
+internal/backends/anthropic.go  Claude API adapter (+ Messages streaming)
+internal/backends/openai.go     OpenAI Responses API adapter (+ Responses streaming)
+internal/backends/claude_cli.go Claude CLI adapter (+ stream-json parser)
+internal/backends/codex_cli.go  Codex CLI adapter and JSONL parser (+ streaming)
+internal/backends/cli.go        shared safe process runner, streaming subprocess runner
+examples/switchable/main.go     provider/flavor/model example (+ --stream flag)
+README.md                       install, quick start, matrix, limitations
+docs/SPEC.md                    this approved source of truth
+docs/tasks/plan.md              approved implementation plan
+docs/tasks/todo.md              dependency-ordered task checklist
 ```
 
-Adapters stay in one package; provider SDK imports stay confined to their
-adapter files.
+The root package holds the public API and re-exports the neutral types from
+internal/core, which internal/backends shares without an import cycle.
+Provider SDK imports are confined to their corresponding adapter files.
 
 ## Code Style
 
