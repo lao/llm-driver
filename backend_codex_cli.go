@@ -13,10 +13,11 @@ import (
 const maxCodexEventSize = 16 << 20
 
 type codexCLIBackend struct {
-	model  string
-	path   string
-	args   []string
-	runner commandRunner
+	model        string
+	path         string
+	args         []string
+	runner       commandRunner
+	streamRunner streamingCommandRunner
 }
 
 type codexCLIEvent struct {
@@ -26,7 +27,9 @@ type codexCLIEvent struct {
 	Error    struct {
 		Message string `json:"message"`
 	} `json:"error"`
-	Item struct {
+	Delta string `json:"delta"`
+	Item  struct {
+		ID   string `json:"id"`
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"item"`
@@ -48,11 +51,16 @@ func newCodexCLIBackend(config cliBackendConfig) *codexCLIBackend {
 	if runner == nil {
 		runner = defaultCommandRunner
 	}
+	streamRunner := config.streamRunner
+	if streamRunner == nil {
+		streamRunner = defaultStreamingCommandRunner
+	}
 	return &codexCLIBackend{
-		model:  config.model,
-		path:   path,
-		args:   append([]string(nil), config.args...),
-		runner: runner,
+		model:        config.model,
+		path:         path,
+		args:         append([]string(nil), config.args...),
+		runner:       runner,
+		streamRunner: streamRunner,
 	}
 }
 
@@ -63,18 +71,7 @@ func newCodexCLIBackend(config cliBackendConfig) *codexCLIBackend {
 // backend_cli_integration_test.go launches the real binary to surface flag
 // drift against the installed `codex` version.
 func (b *codexCLIBackend) generate(ctx context.Context, request Request) (*Response, error) {
-	args := []string{
-		"exec",
-		"--json",
-		"--sandbox", "read-only",
-		"--skip-git-repo-check",
-		"--model", b.model,
-	}
-	if request.System != "" {
-		args = append(args, "--config", codexDeveloperInstructions(request.System))
-	}
-	args = append(args, b.args...)
-	args = append(args, "-")
+	args := b.commandArgs(request)
 
 	stdout, err := executeCLI(
 		ctx,
@@ -97,6 +94,147 @@ func (b *codexCLIBackend) generate(ctx context.Context, request Request) (*Respo
 		return nil, err
 	}
 	return parseCodexCLIOutput(stdout, b.model)
+}
+
+func (b *codexCLIBackend) commandArgs(request Request) []string {
+	args := []string{
+		"exec",
+		"--json",
+		"--sandbox", "read-only",
+		"--skip-git-repo-check",
+		"--model", b.model,
+	}
+	if request.System != "" {
+		args = append(args, "--config", codexDeveloperInstructions(request.System))
+	}
+	args = append(args, b.args...)
+	return append(args, "-")
+}
+
+// generateStream reuses the batch invocation and parses the same JSONL events
+// as they arrive instead of after the process exits.
+func (b *codexCLIBackend) generateStream(ctx context.Context, request Request) (chunkStream, error) {
+	process, err := startCLIStream(
+		ctx,
+		ProviderOpenAI,
+		b.path,
+		b.commandArgs(request),
+		[]byte(renderTranscript(request.Messages)),
+		b.streamRunner,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return newCLIChunkStream(ProviderOpenAI, process, &codexCLIStreamParser{model: b.model}), nil
+}
+
+// codexCLIStreamParser tolerates both Codex CLI shapes: versions that publish
+// an agent message incrementally and versions that publish it only on
+// completion. Item text is treated as cumulative and an explicit delta field as
+// an increment, so text is never emitted twice.
+type codexCLIStreamParser struct {
+	model           string
+	result          Response
+	emitted         map[string]int
+	completed       bool
+	hasFinalMessage bool
+}
+
+func (p *codexCLIStreamParser) event(line []byte) (string, error) {
+	var event codexCLIEvent
+	if err := json.Unmarshal(line, &event); err != nil {
+		return "", codexCLIStreamParseError(fmt.Errorf("decode Codex CLI event: %w", err))
+	}
+
+	switch event.Type {
+	case "thread.started":
+		p.result.ID = event.ThreadID
+	case "turn.completed":
+		p.completed = true
+		p.result.Usage = codexCLIUsage(event)
+	case "turn.failed":
+		message := strings.TrimSpace(event.Error.Message)
+		if message == "" {
+			message = "Codex CLI turn failed"
+		}
+		return "", codexCLIStreamResultError("turn_failed", message)
+	case "error":
+		message := strings.TrimSpace(event.Message)
+		if message == "" {
+			message = "Codex CLI stream failed"
+		}
+		return "", codexCLIStreamResultError("error", message)
+	default:
+		// Unknown event types are ignored, as in the batch parser.
+		if !strings.HasPrefix(event.Type, "item.") || event.Item.Type != "agent_message" {
+			return "", nil
+		}
+		if event.Type == "item.completed" {
+			p.hasFinalMessage = true
+		}
+		if event.Delta != "" {
+			return p.advance(event.Item.ID, p.seen(event.Item.ID)+len(event.Delta), event.Delta), nil
+		}
+		seen := p.seen(event.Item.ID)
+		if seen >= len(event.Item.Text) {
+			return "", nil
+		}
+		return p.advance(event.Item.ID, len(event.Item.Text), event.Item.Text[seen:]), nil
+	}
+	return "", nil
+}
+
+func (p *codexCLIStreamParser) seen(id string) int {
+	return p.emitted[id]
+}
+
+func (p *codexCLIStreamParser) advance(id string, total int, text string) string {
+	if p.emitted == nil {
+		p.emitted = make(map[string]int)
+	}
+	p.emitted[id] = total
+	return text
+}
+
+func (p *codexCLIStreamParser) response() (*Response, error) {
+	if !p.completed {
+		return nil, codexCLIStreamResultError("missing_turn_completion", "Codex CLI output did not complete a turn")
+	}
+	if !p.hasFinalMessage {
+		return nil, codexCLIStreamResultError("missing_final_message", "Codex CLI output did not contain a completed agent message")
+	}
+	response := p.result
+	response.Model = p.model
+	return &response, nil
+}
+
+func codexCLIUsage(event codexCLIEvent) Usage {
+	return Usage{
+		InputTokens:              event.Usage.InputTokens,
+		OutputTokens:             event.Usage.OutputTokens,
+		CachedInputTokens:        event.Usage.CachedInputTokens,
+		CacheCreationInputTokens: event.Usage.CacheWriteInputTokens,
+		ReasoningTokens:          event.Usage.ReasoningOutputTokens,
+	}
+}
+
+func codexCLIStreamParseError(err error) error {
+	return &Error{
+		Provider:  ProviderOpenAI,
+		Flavor:    FlavorCLI,
+		Operation: "generate_stream",
+		Err:       err,
+	}
+}
+
+func codexCLIStreamResultError(code string, message string) error {
+	return &Error{
+		Provider:  ProviderOpenAI,
+		Flavor:    FlavorCLI,
+		Operation: "generate_stream",
+		Code:      code,
+		Message:   strings.TrimSpace(message),
+	}
 }
 
 func codexDeveloperInstructions(system string) string {
@@ -135,13 +273,7 @@ func parseCodexCLIOutput(output []byte, model string) (*Response, error) {
 			}
 		case "turn.completed":
 			completed = true
-			response.Usage = Usage{
-				InputTokens:              event.Usage.InputTokens,
-				OutputTokens:             event.Usage.OutputTokens,
-				CachedInputTokens:        event.Usage.CachedInputTokens,
-				CacheCreationInputTokens: event.Usage.CacheWriteInputTokens,
-				ReasoningTokens:          event.Usage.ReasoningOutputTokens,
-			}
+			response.Usage = codexCLIUsage(event)
 		case "turn.failed":
 			message := strings.TrimSpace(event.Error.Message)
 			if message == "" {
@@ -185,9 +317,4 @@ func codexCLIResultError(code string, message string) error {
 		Code:      code,
 		Message:   strings.TrimSpace(message),
 	}
-}
-
-// TODO(S6): replaced by the incremental JSONL adapter.
-func (b *codexCLIBackend) generateStream(context.Context, Request) (chunkStream, error) {
-	return nil, errors.New("not implemented")
 }

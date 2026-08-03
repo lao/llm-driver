@@ -280,12 +280,22 @@ func (s *cliChunkStream) close() error {
 	return s.process.close()
 }
 
-// fail records a terminal parse failure. It deliberately does not wait for the
-// process: the CLI may still be writing, and waiting before stdout is drained
-// would deadlock. Such errors already carry a code and message; only failures
-// detected at exit carry a status.
+// fail records a terminal parse failure and, for parity with the batch path,
+// stamps the process exit code onto it when the CLI also exited nonzero.
+// Remaining output is drained first: waiting on a process whose stdout is not
+// being read would deadlock.
 func (s *cliChunkStream) fail(err error) error {
 	s.failure = err
+
+	_, _ = io.Copy(io.Discard, s.process.stdout())
+	exitCode, _, waitErr := s.process.wait()
+	if waitErr != nil || exitCode == 0 {
+		return err
+	}
+	var contextual *Error
+	if errors.As(err, &contextual) && contextual.Status == 0 {
+		contextual.Status = exitCode
+	}
 	return err
 }
 

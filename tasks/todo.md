@@ -16,7 +16,7 @@ refactor green, run its verification before checking the box.
       close/cancel) + hygiene tests under `-race`
 - [x] S5: Claude CLI stream-json adapter (`--include-partial-messages`) +
       incremental fake-runner tests
-- [ ] S6: Codex CLI incremental JSONL adapter (delta dedup) + tests
+- [x] S6: Codex CLI incremental JSONL adapter (delta dedup) + tests
       — checkpoint: full race suite
 - [ ] S7: four-target streaming contract suite in `contract_test.go`
 - [ ] S8: `examples/switchable --stream`, README, `doc.go`
