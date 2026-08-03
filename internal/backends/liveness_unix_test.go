@@ -1,6 +1,6 @@
 //go:build unix
 
-package llmwrapper
+package backends
 
 import "syscall"
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lao/llmwrapper"
+	llmwrapper "github.com/lao/llmwrapper"
 )
 
 func TestParseOptionsBuildsConfigAndRequest(t *testing.T) {

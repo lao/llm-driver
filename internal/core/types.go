@@ -1,4 +1,4 @@
-package llmwrapper
+package core
 
 import (
 	"fmt"

@@ -1,17 +1,19 @@
-package llmwrapper
+package backends
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 type claudeCLIBackend struct {
 	model  string
 	path   string
 	args   []string
-	runner commandRunner
+	runner core.CommandRunner
 }
 
 type claudeCLIResult struct {
@@ -46,13 +48,13 @@ func newClaudeCLIBackend(config cliBackendConfig) *claudeCLIBackend {
 }
 
 // These flags target the non-interactive `claude -p` contract described in
-// SPEC.md. Print mode is already single-shot and non-persistent, and the
+// docs/SPEC.md. Print mode is already single-shot and non-persistent, and the
 // default permission mode keeps a headless run from approving agent tool
 // actions. Default tests inject a fake runner and cannot catch a renamed or
-// removed flag, so the opt-in `go test -tags integration` smoke test in
-// backend_cli_integration_test.go launches the real binary to surface flag
-// drift against the installed `claude` version.
-func (b *claudeCLIBackend) generate(ctx context.Context, request Request) (*Response, error) {
+// removed flag, so the opt-in `go test -tags integration` smoke test in the
+// root package's cli_integration_test.go launches the real binary to surface
+// flag drift against the installed `claude` version.
+func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
 	args := []string{
 		"-p",
 		"--output-format", "json",
@@ -66,7 +68,7 @@ func (b *claudeCLIBackend) generate(ctx context.Context, request Request) (*Resp
 
 	stdout, err := executeCLI(
 		ctx,
-		ProviderClaude,
+		core.ProviderClaude,
 		b.path,
 		args,
 		[]byte(renderTranscript(request.Messages)),
@@ -78,12 +80,12 @@ func (b *claudeCLIBackend) generate(ctx context.Context, request Request) (*Resp
 	return parseClaudeCLIOutput(stdout, b.model)
 }
 
-func parseClaudeCLIOutput(stdout []byte, model string) (*Response, error) {
+func parseClaudeCLIOutput(stdout []byte, model string) (*core.Response, error) {
 	var result claudeCLIResult
 	if err := json.Unmarshal(stdout, &result); err != nil {
-		return nil, &Error{
-			Provider:  ProviderClaude,
-			Flavor:    FlavorCLI,
+		return nil, &core.Error{
+			Provider:  core.ProviderClaude,
+			Flavor:    core.FlavorCLI,
 			Operation: "generate",
 			Err:       fmt.Errorf("decode Claude CLI output: %w", err),
 		}
@@ -93,20 +95,20 @@ func parseClaudeCLIOutput(stdout []byte, model string) (*Response, error) {
 		if strings.TrimSpace(message) == "" {
 			message = "Claude CLI returned an unsuccessful result"
 		}
-		return nil, &Error{
-			Provider:  ProviderClaude,
-			Flavor:    FlavorCLI,
+		return nil, &core.Error{
+			Provider:  core.ProviderClaude,
+			Flavor:    core.FlavorCLI,
 			Operation: "generate",
 			Code:      claudeCLIErrorCode(result),
 			Message:   message,
 		}
 	}
 
-	return &Response{
+	return &core.Response{
 		ID:    result.SessionID,
 		Model: model,
 		Text:  result.Result,
-		Usage: Usage{
+		Usage: core.Usage{
 			InputTokens:              result.Usage.InputTokens,
 			OutputTokens:             result.Usage.OutputTokens,
 			CachedInputTokens:        result.Usage.CacheReadInputTokens,

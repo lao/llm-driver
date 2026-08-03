@@ -27,9 +27,9 @@ existing module path remains unchanged.
   behavioral redesign and receives its own review checkpoint.
 - Default tests stay offline: API tests use `httptest.Server`; CLI tests use an
   injected process runner.
-- The GitHub remote remains `github.com/lao/claudewrap` until the separate
-  repository setting is renamed. The committed Go module path remains
-  `github.com/lao/claudewrap`; only the root package is renamed to `llmwrapper`.
+- The GitHub remote and the committed Go module path both remain
+  `github.com/lao/llmwrapper`, matching the repository so external consumers can
+  fetch it; the root package is also named `llmwrapper`.
 
 ## Architecture
 
@@ -107,7 +107,7 @@ Dependencies: none.
 Acceptance checkpoint:
 
 - The root package compiles only as `llmwrapper`; `go.mod` retains the fetchable
-  `github.com/lao/claudewrap` module path.
+  `github.com/lao/llmwrapper` module path.
 - All four provider/flavor pairs resolve to an internal target; invalid enums,
   blank models, and invalid requests fail before adapter work.
 - `errors.Is`/`errors.As` work for validation and wrapped operational errors.
@@ -309,8 +309,8 @@ go test -race ./...
 go test -cover ./...
 go vet ./...
 go build ./examples/switchable
-rg -n 'package claudewrap|github.com/lao/llmwrapper' --glob '*.go' --glob 'go.mod' --glob '*.md' --glob '!tasks/**'
-rg -n '^module github.com/lao/claudewrap$' go.mod
+rg -n 'package claudewrap|github.com/lao/claudewrap' --glob '*.go' --glob 'go.mod' --glob '*.md' --glob '!tasks/**'
+rg -n '^module github.com/lao/llmwrapper$' go.mod
 git diff --check origin/main...HEAD
 ```
 
@@ -341,7 +341,7 @@ command must match the single declaration in `go.mod`.
 | CLI tools are agentic, unlike hosted text endpoints | Medium | Use non-interactive single-shot modes, read-only Codex sandbox, stdin prompts, and explicit README limitations |
 | Usage fields do not align one-to-one | Medium | Keep a small superset of neutral counters and leave unavailable counters zero |
 | CLI max tokens cannot be enforced consistently | Low | Accept the shared request, document the limitation, and never claim exact transport parity |
-| Package and module names intentionally differ until repository rename | Medium | Keep the fetchable `github.com/lao/claudewrap` module path in code/docs and distinguish it from package `llmwrapper` in verification |
+| Module path must match the canonical repository to stay fetchable | Medium | Keep the fetchable `github.com/lao/llmwrapper` module path in code/docs, matching both the repository and the `llmwrapper` package name |
 
 ## Verification Checkpoints
 

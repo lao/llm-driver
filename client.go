@@ -1,6 +1,11 @@
 package llmwrapper
 
-import "context"
+import (
+	"context"
+
+	"github.com/lao/llmwrapper/internal/backends"
+	"github.com/lao/llmwrapper/internal/core"
+)
 
 // Client sends provider-neutral generation requests through one configured
 // provider and flavor.
@@ -8,7 +13,7 @@ type Client struct {
 	provider Provider
 	flavor   Flavor
 	model    string
-	backend  backend
+	backend  core.Backend
 }
 
 // New constructs a Client for one provider, flavor, and model.
@@ -16,8 +21,8 @@ func New(config Config) (*Client, error) {
 	return newClient(config, nil)
 }
 
-func newClient(config Config, runner commandRunner) (*Client, error) {
-	if err := config.validate(); err != nil {
+func newClient(config Config, runner core.CommandRunner) (*Client, error) {
+	if err := core.ValidateConfig(config); err != nil {
 		return nil, &Error{
 			Provider:  config.Provider,
 			Flavor:    config.Flavor,
@@ -26,7 +31,7 @@ func newClient(config Config, runner commandRunner) (*Client, error) {
 		}
 	}
 
-	target, err := buildBackend(config, runner)
+	target, err := backends.New(config, runner)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +45,7 @@ func newClient(config Config, runner commandRunner) (*Client, error) {
 
 // Generate validates and sends one text request through the configured target.
 func (c *Client) Generate(ctx context.Context, request Request) (*Response, error) {
-	if err := request.validate(); err != nil {
+	if err := core.ValidateRequest(request); err != nil {
 		return nil, &Error{
 			Provider:  c.provider,
 			Flavor:    c.flavor,
@@ -49,7 +54,7 @@ func (c *Client) Generate(ctx context.Context, request Request) (*Response, erro
 		}
 	}
 
-	response, err := c.backend.generate(ctx, request)
+	response, err := c.backend.Generate(ctx, request)
 	if err != nil {
 		return nil, err
 	}

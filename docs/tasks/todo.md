@@ -26,7 +26,7 @@ legacy deletions must be kept separate from new behavioral logic in the diff.
 
 **Acceptance criteria:**
 
-- [x] `go.mod` retains `github.com/lao/claudewrap`; every root Go package
+- [x] `go.mod` retains `github.com/lao/llmwrapper`; every root Go package
       declaration, exported API, sentinel, and error prefix use `llmwrapper`;
       no compatibility API remains.
 - [x] Exactly the four approved provider/flavor pairs and nonblank models are
@@ -288,8 +288,8 @@ limitations.
       parity.
 - [x] `doc.go` demonstrates the approved API and every exported declaration has
       a concise Go doc comment.
-- [x] Documentation consistently distinguishes package `llmwrapper` from the
-      unchanged `github.com/lao/claudewrap` module path.
+- [x] Documentation consistently uses package `llmwrapper` and the matching
+      `github.com/lao/llmwrapper` module path.
 
 **Verification:**
 
@@ -341,8 +341,8 @@ and record completed checklist items only after their commands pass.
 - [x] `go test -cover ./...`
 - [x] `go vet ./...`
 - [x] `go build ./examples/switchable`
-- [x] `rg -n 'package claudewrap|github.com/lao/llmwrapper' --glob '*.go' --glob 'go.mod' --glob '*.md' --glob '!tasks/**'` produces no output
-- [x] `rg -n '^module github.com/lao/claudewrap$' go.mod` matches the committed module declaration
+- [x] `rg -n 'package claudewrap|github.com/lao/claudewrap' --glob '*.go' --glob 'go.mod' --glob '*.md' --glob '!tasks/**'` produces no output
+- [x] `rg -n '^module github.com/lao/llmwrapper$' go.mod` matches the committed module declaration
 - [x] `git diff --check origin/main...HEAD`
 
 **Dependencies:** Tasks 1–8.

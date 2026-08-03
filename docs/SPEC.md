@@ -17,8 +17,8 @@ authenticated CLI and later use the corresponding hosted API—or switch
 providers—without changing application call sites. Only the `Config` values for
 provider, flavor, credentials, and model should change.
 
-This is a clean package rename. The module path is
-`github.com/lao/llmwrapper`, matching the renamed repository; no compatibility
+This is a clean package rename. The committed module path remains
+`github.com/lao/llmwrapper`, matching the existing repository; no compatibility
 package or deprecated aliases for the former package are included.
 
 ### Public API
@@ -198,26 +198,28 @@ Default tests must not contact a real provider or start a real agent CLI.
 go.mod / go.sum                 module metadata and pinned SDKs
 doc.go                          package documentation and short example
 client.go                       Client, New, target selection, Generate
-config.go                       Config and provider/flavor validation
-types.go                        neutral request, response, message, usage types
-errors.go                       normalized Error and sentinel errors
-backend.go                      small unexported backend interface
-backend_anthropic.go            Claude API adapter
-backend_openai.go               OpenAI Responses API adapter
-backend_claude_cli.go           Claude CLI adapter
-backend_codex_cli.go            Codex CLI adapter and JSONL parser
-backend_cli.go                  shared safe process runner/prompt rendering
-*_test.go                       colocated unit and contract tests
+llmwrapper.go                   public aliases for the internal/core types
+*_test.go                       contract and adapter tests via the public API
+internal/core/config.go         Config and provider/flavor validation
+internal/core/types.go          neutral request, response, message, usage types
+internal/core/errors.go         normalized Error and sentinel errors
+internal/core/backend.go        Backend interface and CommandRunner
+internal/backends/build.go      backend construction from a Config
+internal/backends/anthropic.go  Claude API adapter
+internal/backends/openai.go     OpenAI Responses API adapter
+internal/backends/claude_cli.go Claude CLI adapter
+internal/backends/codex_cli.go  Codex CLI adapter and JSONL parser
+internal/backends/cli.go        shared safe process runner/prompt rendering
 examples/switchable/main.go     provider/flavor/model command-line example
 README.md                       install, quick start, matrix, limitations
-SPEC.md                         this approved source of truth
-tasks/plan.md                   approved implementation plan
-tasks/todo.md                   dependency-ordered task checklist
+docs/SPEC.md                    this approved source of truth
+docs/tasks/plan.md              approved implementation plan
+docs/tasks/todo.md              dependency-ordered task checklist
 ```
 
-Adapters remain in one package because the package is small and they depend on
-the same neutral types. Provider SDK imports are confined to their corresponding
-adapter files.
+The root package holds the public API and re-exports the neutral types from
+internal/core, which internal/backends shares without an import cycle.
+Provider SDK imports are confined to their corresponding adapter files.
 
 ## Code Style
 

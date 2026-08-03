@@ -1,4 +1,4 @@
-package llmwrapper
+package backends
 
 import (
 	"bytes"
@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 const (
@@ -16,8 +18,6 @@ const (
 )
 
 var errCLIOutputTooLarge = errors.New("llmwrapper: CLI output exceeds limit")
-
-type commandRunner func(context.Context, string, []string, []byte) ([]byte, []byte, int, error)
 
 type boundedBuffer struct {
 	buffer   bytes.Buffer
@@ -48,7 +48,7 @@ func (b *boundedBuffer) Bytes() []byte {
 func defaultCommandRunner(ctx context.Context, name string, args []string, stdin []byte) ([]byte, []byte, int, error) {
 	path, err := exec.LookPath(name)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("%w: %s", ErrExecutableNotFound, name)
+		return nil, nil, 0, fmt.Errorf("%w: %s", core.ErrExecutableNotFound, name)
 	}
 
 	command := exec.CommandContext(ctx, path, args...)
@@ -80,17 +80,17 @@ func defaultCommandRunner(ctx context.Context, name string, args []string, stdin
 
 func executeCLI(
 	ctx context.Context,
-	provider Provider,
+	provider core.Provider,
 	name string,
 	args []string,
 	stdin []byte,
-	runner commandRunner,
+	runner core.CommandRunner,
 ) ([]byte, error) {
 	stdout, stderr, exitCode, err := runner(ctx, name, args, stdin)
 	if err != nil {
-		return nil, &Error{
+		return nil, &core.Error{
 			Provider:  provider,
-			Flavor:    FlavorCLI,
+			Flavor:    core.FlavorCLI,
 			Operation: "generate",
 			Message:   strings.TrimSpace(string(stderr)),
 			Err:       err,
@@ -101,9 +101,9 @@ func executeCLI(
 		if message == "" {
 			message = "CLI command failed"
 		}
-		return stdout, &Error{
+		return stdout, &core.Error{
 			Provider:  provider,
-			Flavor:    FlavorCLI,
+			Flavor:    core.FlavorCLI,
 			Operation: "generate",
 			Status:    exitCode,
 			Message:   message,
@@ -112,8 +112,8 @@ func executeCLI(
 	return stdout, nil
 }
 
-func renderTranscript(messages []Message) string {
-	if len(messages) == 1 && messages[0].Role == RoleUser {
+func renderTranscript(messages []core.Message) string {
+	if len(messages) == 1 && messages[0].Role == core.RoleUser {
 		return messages[0].Text
 	}
 
@@ -122,7 +122,7 @@ func renderTranscript(messages []Message) string {
 		if i > 0 {
 			transcript.WriteString("\n\n")
 		}
-		if message.Role == RoleAssistant {
+		if message.Role == core.RoleAssistant {
 			transcript.WriteString("Assistant: ")
 		} else {
 			transcript.WriteString("User: ")

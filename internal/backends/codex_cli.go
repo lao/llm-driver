@@ -1,4 +1,4 @@
-package llmwrapper
+package backends
 
 import (
 	"bufio"
@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/lao/llmwrapper/internal/core"
 )
 
 const maxCodexEventSize = 16 << 20
@@ -16,7 +18,7 @@ type codexCLIBackend struct {
 	model  string
 	path   string
 	args   []string
-	runner commandRunner
+	runner core.CommandRunner
 }
 
 type codexCLIEvent struct {
@@ -57,12 +59,12 @@ func newCodexCLIBackend(config cliBackendConfig) *codexCLIBackend {
 }
 
 // These flags target the non-interactive `codex exec` contract described in
-// SPEC.md (JSONL output, read-only sandbox, no git-repo check). Default tests
-// inject a fake runner and cannot catch a renamed or removed flag, so the
-// opt-in `go test -tags integration` smoke test in
-// backend_cli_integration_test.go launches the real binary to surface flag
+// docs/SPEC.md (JSONL output, read-only sandbox, no git-repo check). Default
+// tests inject a fake runner and cannot catch a renamed or removed flag, so
+// the opt-in `go test -tags integration` smoke test in the root package's
+// cli_integration_test.go launches the real binary to surface flag
 // drift against the installed `codex` version.
-func (b *codexCLIBackend) generate(ctx context.Context, request Request) (*Response, error) {
+func (b *codexCLIBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
 	args := []string{
 		"exec",
 		"--json",
@@ -78,17 +80,17 @@ func (b *codexCLIBackend) generate(ctx context.Context, request Request) (*Respo
 
 	stdout, err := executeCLI(
 		ctx,
-		ProviderOpenAI,
+		core.ProviderOpenAI,
 		b.path,
 		args,
 		[]byte(renderTranscript(request.Messages)),
 		b.runner,
 	)
 	if err != nil {
-		var processError *Error
+		var processError *core.Error
 		if errors.As(err, &processError) && processError.Status != 0 {
 			_, diagnosticErr := parseCodexCLIOutput(stdout, b.model)
-			var diagnostic *Error
+			var diagnostic *core.Error
 			if errors.As(diagnosticErr, &diagnostic) && (diagnostic.Code == "turn_failed" || diagnostic.Code == "error") {
 				diagnostic.Status = processError.Status
 				return nil, diagnostic
@@ -104,8 +106,8 @@ func codexDeveloperInstructions(system string) string {
 	return "developer_instructions=" + string(encoded)
 }
 
-func parseCodexCLIOutput(output []byte, model string) (*Response, error) {
-	var response Response
+func parseCodexCLIOutput(output []byte, model string) (*core.Response, error) {
+	var response core.Response
 	response.Model = model
 	var completed bool
 	var hasFinalMessage bool
@@ -135,7 +137,7 @@ func parseCodexCLIOutput(output []byte, model string) (*Response, error) {
 			}
 		case "turn.completed":
 			completed = true
-			response.Usage = Usage{
+			response.Usage = core.Usage{
 				InputTokens:              event.Usage.InputTokens,
 				OutputTokens:             event.Usage.OutputTokens,
 				CachedInputTokens:        event.Usage.CachedInputTokens,
@@ -169,18 +171,18 @@ func parseCodexCLIOutput(output []byte, model string) (*Response, error) {
 }
 
 func codexCLIParseError(err error) error {
-	return &Error{
-		Provider:  ProviderOpenAI,
-		Flavor:    FlavorCLI,
+	return &core.Error{
+		Provider:  core.ProviderOpenAI,
+		Flavor:    core.FlavorCLI,
 		Operation: "generate",
 		Err:       err,
 	}
 }
 
 func codexCLIResultError(code string, message string) error {
-	return &Error{
-		Provider:  ProviderOpenAI,
-		Flavor:    FlavorCLI,
+	return &core.Error{
+		Provider:  core.ProviderOpenAI,
+		Flavor:    core.FlavorCLI,
 		Operation: "generate",
 		Code:      code,
 		Message:   strings.TrimSpace(message),
