@@ -11,20 +11,26 @@ import (
 	"testing"
 )
 
-func TestContractGenerateAcrossFourTargets(t *testing.T) {
-	t.Parallel()
+// contractTarget is one of the four provider/flavor combinations every contract
+// test runs against.
+type contractTarget struct {
+	provider Provider
+	flavor   Flavor
+}
 
-	targets := []struct {
-		provider Provider
-		flavor   Flavor
-	}{
+func contractTargets() []contractTarget {
+	return []contractTarget{
 		{provider: ProviderClaude, flavor: FlavorAPI},
 		{provider: ProviderClaude, flavor: FlavorCLI},
 		{provider: ProviderOpenAI, flavor: FlavorAPI},
 		{provider: ProviderOpenAI, flavor: FlavorCLI},
 	}
+}
 
-	for _, target := range targets {
+func TestContractGenerateAcrossFourTargets(t *testing.T) {
+	t.Parallel()
+
+	for _, target := range contractTargets() {
 		t.Run(string(target.provider)+"/"+string(target.flavor), func(t *testing.T) {
 			t.Parallel()
 
@@ -172,17 +178,7 @@ func newContractTarget(t *testing.T, provider Provider, flavor Flavor) (Config, 
 func TestContractGenerateStreamAcrossFourTargets(t *testing.T) {
 	t.Parallel()
 
-	targets := []struct {
-		provider Provider
-		flavor   Flavor
-	}{
-		{provider: ProviderClaude, flavor: FlavorAPI},
-		{provider: ProviderClaude, flavor: FlavorCLI},
-		{provider: ProviderOpenAI, flavor: FlavorAPI},
-		{provider: ProviderOpenAI, flavor: FlavorCLI},
-	}
-
-	for _, target := range targets {
+	for _, target := range contractTargets() {
 		t.Run(string(target.provider)+"/"+string(target.flavor), func(t *testing.T) {
 			t.Parallel()
 
@@ -251,17 +247,7 @@ func TestContractGenerateStreamAcrossFourTargets(t *testing.T) {
 func TestContractStreamMidStreamFailureAcrossFourTargets(t *testing.T) {
 	t.Parallel()
 
-	targets := []struct {
-		provider Provider
-		flavor   Flavor
-	}{
-		{provider: ProviderClaude, flavor: FlavorAPI},
-		{provider: ProviderClaude, flavor: FlavorCLI},
-		{provider: ProviderOpenAI, flavor: FlavorAPI},
-		{provider: ProviderOpenAI, flavor: FlavorCLI},
-	}
-
-	for _, target := range targets {
+	for _, target := range contractTargets() {
 		t.Run(string(target.provider)+"/"+string(target.flavor), func(t *testing.T) {
 			t.Parallel()
 
@@ -342,6 +328,21 @@ func contractSSEEvents(provider Provider) []string {
 	}
 }
 
+// newContractAPIStreamTarget points an API client at a test server replaying
+// the given SSE events.
+func newContractAPIStreamTarget(t *testing.T, config Config, events []string) *Client {
+	t.Helper()
+
+	server, _ := newSSETestServer(t, http.StatusOK, events)
+	config.APIKey = "contract-key"
+	config.BaseURL = server.URL
+	client, err := New(config)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	return client
+}
+
 func newContractStreamTarget(t *testing.T, provider Provider, flavor Flavor) *Client {
 	t.Helper()
 
@@ -351,14 +352,7 @@ func newContractStreamTarget(t *testing.T, provider Provider, flavor Flavor) *Cl
 		return newCLIStreamClient(config, runner.run)
 	}
 
-	server, _ := newSSETestServer(t, http.StatusOK, contractSSEEvents(provider))
-	config.APIKey = "contract-key"
-	config.BaseURL = server.URL
-	client, err := New(config)
-	if err != nil {
-		t.Fatalf("New(): %v", err)
-	}
-	return client
+	return newContractAPIStreamTarget(t, config, contractSSEEvents(provider))
 }
 
 func newContractFailingStreamTarget(t *testing.T, provider Provider, flavor Flavor) *Client {
@@ -378,30 +372,13 @@ func newContractFailingStreamTarget(t *testing.T, provider Provider, flavor Flav
 		events = append(events, "event: error\n"+
 			`data: {"type":"error","sequence_number":2,"code":"server_error","message":"upstream failed","param":null}`+"\n\n")
 	}
-	server, _ := newSSETestServer(t, http.StatusOK, events)
-	config.APIKey = "contract-key"
-	config.BaseURL = server.URL
-	client, err := New(config)
-	if err != nil {
-		t.Fatalf("New(): %v", err)
-	}
-	return client
+	return newContractAPIStreamTarget(t, config, events)
 }
 
 func TestContractStreamTruncatedOutputAcrossFourTargets(t *testing.T) {
 	t.Parallel()
 
-	targets := []struct {
-		provider Provider
-		flavor   Flavor
-	}{
-		{provider: ProviderClaude, flavor: FlavorAPI},
-		{provider: ProviderClaude, flavor: FlavorCLI},
-		{provider: ProviderOpenAI, flavor: FlavorAPI},
-		{provider: ProviderOpenAI, flavor: FlavorCLI},
-	}
-
-	for _, target := range targets {
+	for _, target := range contractTargets() {
 		t.Run(string(target.provider)+"/"+string(target.flavor), func(t *testing.T) {
 			t.Parallel()
 
@@ -462,12 +439,5 @@ func newContractTruncatedStreamTarget(t *testing.T, provider Provider, flavor Fl
 	} else {
 		events = events[:2] // no response.completed
 	}
-	server, _ := newSSETestServer(t, http.StatusOK, events)
-	config.APIKey = "contract-key"
-	config.BaseURL = server.URL
-	client, err := New(config)
-	if err != nil {
-		t.Fatalf("New(): %v", err)
-	}
-	return client
+	return newContractAPIStreamTarget(t, config, events)
 }

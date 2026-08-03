@@ -8,11 +8,7 @@ import (
 )
 
 type claudeCLIBackend struct {
-	model        string
-	path         string
-	args         []string
-	runner       commandRunner
-	streamRunner streamingCommandRunner
+	cliBackendConfig
 }
 
 type claudeCLIResult struct {
@@ -30,25 +26,7 @@ type claudeCLIResult struct {
 }
 
 func newClaudeCLIBackend(config cliBackendConfig) *claudeCLIBackend {
-	path := config.path
-	if path == "" {
-		path = "claude"
-	}
-	runner := config.runner
-	if runner == nil {
-		runner = defaultCommandRunner
-	}
-	streamRunner := config.streamRunner
-	if streamRunner == nil {
-		streamRunner = defaultStreamingCommandRunner
-	}
-	return &claudeCLIBackend{
-		model:        config.model,
-		path:         path,
-		args:         append([]string(nil), config.args...),
-		runner:       runner,
-		streamRunner: streamRunner,
-	}
+	return &claudeCLIBackend{withCLIDefaults(config, "claude")}
 }
 
 // These flags target the non-interactive `claude -p` contract described in
@@ -84,8 +62,8 @@ func (b *claudeCLIBackend) generate(ctx context.Context, request Request) (*Resp
 	return parseClaudeCLIOutput(stdout, b.model)
 }
 
-// generate builds the same transcript and system flags as the batch path but
-// asks for incremental stream-json output. Print mode requires --verbose for
+// generateStream builds the same transcript and system flags as the batch path
+// but asks for incremental stream-json output. Print mode requires --verbose for
 // stream-json, and --include-partial-messages adds the raw Anthropic SSE
 // events the text deltas come from.
 func (b *claudeCLIBackend) generateStream(ctx context.Context, request Request) (chunkStream, error) {

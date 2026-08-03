@@ -13,11 +13,7 @@ import (
 const maxCodexEventSize = 16 << 20
 
 type codexCLIBackend struct {
-	model        string
-	path         string
-	args         []string
-	runner       commandRunner
-	streamRunner streamingCommandRunner
+	cliBackendConfig
 }
 
 type codexCLIEvent struct {
@@ -43,25 +39,7 @@ type codexCLIEvent struct {
 }
 
 func newCodexCLIBackend(config cliBackendConfig) *codexCLIBackend {
-	path := config.path
-	if path == "" {
-		path = "codex"
-	}
-	runner := config.runner
-	if runner == nil {
-		runner = defaultCommandRunner
-	}
-	streamRunner := config.streamRunner
-	if streamRunner == nil {
-		streamRunner = defaultStreamingCommandRunner
-	}
-	return &codexCLIBackend{
-		model:        config.model,
-		path:         path,
-		args:         append([]string(nil), config.args...),
-		runner:       runner,
-		streamRunner: streamRunner,
-	}
+	return &codexCLIBackend{withCLIDefaults(config, "codex")}
 }
 
 // These flags target the non-interactive `codex exec` contract described in
@@ -143,7 +121,7 @@ type codexCLIStreamParser struct {
 func (p *codexCLIStreamParser) event(line []byte) (string, error) {
 	var event codexCLIEvent
 	if err := json.Unmarshal(line, &event); err != nil {
-		return "", codexCLIStreamParseError(fmt.Errorf("decode Codex CLI event: %w", err))
+		return "", codexCLIParseError("generate_stream", fmt.Errorf("decode Codex CLI event: %w", err))
 	}
 
 	switch event.Type {
@@ -152,18 +130,8 @@ func (p *codexCLIStreamParser) event(line []byte) (string, error) {
 	case "turn.completed":
 		p.completed = true
 		p.result.Usage = codexCLIUsage(event)
-	case "turn.failed":
-		message := strings.TrimSpace(event.Error.Message)
-		if message == "" {
-			message = "Codex CLI turn failed"
-		}
-		return "", codexCLIStreamResultError("turn_failed", message)
-	case "error":
-		message := strings.TrimSpace(event.Message)
-		if message == "" {
-			message = "Codex CLI stream failed"
-		}
-		return "", codexCLIStreamResultError("error", message)
+	case "turn.failed", "error":
+		return "", codexCLIFailureError(event, "generate_stream")
 	default:
 		// Unknown event types are ignored, as in the batch parser.
 		if !strings.HasPrefix(event.Type, "item.") || event.Item.Type != "agent_message" {
@@ -172,36 +140,31 @@ func (p *codexCLIStreamParser) event(line []byte) (string, error) {
 		if event.Type == "item.completed" {
 			p.hasFinalMessage = true
 		}
+		seen := p.emitted[event.Item.ID]
 		if event.Delta != "" {
-			return p.advance(event.Item.ID, p.seen(event.Item.ID)+len(event.Delta), event.Delta), nil
+			p.record(event.Item.ID, seen+len(event.Delta))
+			return event.Delta, nil
 		}
-		seen := p.seen(event.Item.ID)
 		if seen >= len(event.Item.Text) {
 			return "", nil
 		}
-		return p.advance(event.Item.ID, len(event.Item.Text), event.Item.Text[seen:]), nil
+		p.record(event.Item.ID, len(event.Item.Text))
+		return event.Item.Text[seen:], nil
 	}
 	return "", nil
 }
 
-func (p *codexCLIStreamParser) seen(id string) int {
-	return p.emitted[id]
-}
-
-func (p *codexCLIStreamParser) advance(id string, total int, text string) string {
+// record marks how much of an item's text has been emitted.
+func (p *codexCLIStreamParser) record(id string, total int) {
 	if p.emitted == nil {
 		p.emitted = make(map[string]int)
 	}
 	p.emitted[id] = total
-	return text
 }
 
 func (p *codexCLIStreamParser) response() (*Response, error) {
-	if !p.completed {
-		return nil, codexCLIStreamResultError("missing_turn_completion", "Codex CLI output did not complete a turn")
-	}
-	if !p.hasFinalMessage {
-		return nil, codexCLIStreamResultError("missing_final_message", "Codex CLI output did not contain a completed agent message")
+	if err := codexCLIOutcomeError("generate_stream", p.completed, p.hasFinalMessage); err != nil {
+		return nil, err
 	}
 	response := p.result
 	response.Model = p.model
@@ -215,25 +178,6 @@ func codexCLIUsage(event codexCLIEvent) Usage {
 		CachedInputTokens:        event.Usage.CachedInputTokens,
 		CacheCreationInputTokens: event.Usage.CacheWriteInputTokens,
 		ReasoningTokens:          event.Usage.ReasoningOutputTokens,
-	}
-}
-
-func codexCLIStreamParseError(err error) error {
-	return &Error{
-		Provider:  ProviderOpenAI,
-		Flavor:    FlavorCLI,
-		Operation: "generate_stream",
-		Err:       err,
-	}
-}
-
-func codexCLIStreamResultError(code string, message string) error {
-	return &Error{
-		Provider:  ProviderOpenAI,
-		Flavor:    FlavorCLI,
-		Operation: "generate_stream",
-		Code:      code,
-		Message:   strings.TrimSpace(message),
 	}
 }
 
@@ -260,7 +204,7 @@ func parseCodexCLIOutput(output []byte, model string) (*Response, error) {
 
 		var event codexCLIEvent
 		if err := json.Unmarshal(line, &event); err != nil {
-			return nil, codexCLIParseError(fmt.Errorf("decode Codex CLI event %d: %w", lineNumber, err))
+			return nil, codexCLIParseError("generate", fmt.Errorf("decode Codex CLI event %d: %w", lineNumber, err))
 		}
 
 		switch event.Type {
@@ -274,47 +218,64 @@ func parseCodexCLIOutput(output []byte, model string) (*Response, error) {
 		case "turn.completed":
 			completed = true
 			response.Usage = codexCLIUsage(event)
-		case "turn.failed":
-			message := strings.TrimSpace(event.Error.Message)
-			if message == "" {
-				message = "Codex CLI turn failed"
-			}
-			return nil, codexCLIResultError("turn_failed", message)
-		case "error":
-			message := strings.TrimSpace(event.Message)
-			if message == "" {
-				message = "Codex CLI stream failed"
-			}
-			return nil, codexCLIResultError("error", message)
+		case "turn.failed", "error":
+			return nil, codexCLIFailureError(event, "generate")
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, codexCLIParseError(fmt.Errorf("scan Codex CLI output: %w", err))
+		return nil, codexCLIParseError("generate", fmt.Errorf("scan Codex CLI output: %w", err))
 	}
-	if !completed {
-		return nil, codexCLIResultError("missing_turn_completion", "Codex CLI output did not complete a turn")
-	}
-	if !hasFinalMessage {
-		return nil, codexCLIResultError("missing_final_message", "Codex CLI output did not contain a completed agent message")
+	if err := codexCLIOutcomeError("generate", completed, hasFinalMessage); err != nil {
+		return nil, err
 	}
 	return &response, nil
 }
 
-func codexCLIParseError(err error) error {
+func codexCLIParseError(operation string, err error) error {
 	return &Error{
 		Provider:  ProviderOpenAI,
 		Flavor:    FlavorCLI,
-		Operation: "generate",
+		Operation: operation,
 		Err:       err,
 	}
 }
 
-func codexCLIResultError(code string, message string) error {
+func codexCLIResultError(operation string, code string, message string) error {
 	return &Error{
 		Provider:  ProviderOpenAI,
 		Flavor:    FlavorCLI,
-		Operation: "generate",
+		Operation: operation,
 		Code:      code,
 		Message:   strings.TrimSpace(message),
 	}
+}
+
+// codexCLIFailureError normalizes the two failure events both the batch and the
+// streaming parser handle. It reports nil for any other event type.
+func codexCLIFailureError(event codexCLIEvent, operation string) error {
+	var code, message, fallback string
+	switch event.Type {
+	case "turn.failed":
+		code, message, fallback = "turn_failed", event.Error.Message, "Codex CLI turn failed"
+	case "error":
+		code, message, fallback = "error", event.Message, "Codex CLI stream failed"
+	default:
+		return nil
+	}
+	if strings.TrimSpace(message) == "" {
+		message = fallback
+	}
+	return codexCLIResultError(operation, code, message)
+}
+
+// codexCLIOutcomeError reports the error for output that ended without a
+// completed turn or a final agent message, keeping both parsers in agreement.
+func codexCLIOutcomeError(operation string, completed bool, hasFinalMessage bool) error {
+	switch {
+	case !completed:
+		return codexCLIResultError(operation, "missing_turn_completion", "Codex CLI output did not complete a turn")
+	case !hasFinalMessage:
+		return codexCLIResultError(operation, "missing_final_message", "Codex CLI output did not contain a completed agent message")
+	}
+	return nil
 }

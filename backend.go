@@ -25,6 +25,22 @@ type cliBackendConfig struct {
 	streamRunner streamingCommandRunner
 }
 
+// withCLIDefaults supplies the executable and runners a CLI backend falls back
+// to when the caller left them unset, and copies the caller's extra arguments.
+func withCLIDefaults(config cliBackendConfig, defaultPath string) cliBackendConfig {
+	if config.path == "" {
+		config.path = defaultPath
+	}
+	if config.runner == nil {
+		config.runner = defaultCommandRunner
+	}
+	if config.streamRunner == nil {
+		config.streamRunner = defaultStreamingCommandRunner
+	}
+	config.args = append([]string(nil), config.args...)
+	return config
+}
+
 func buildBackend(config Config, runner commandRunner) (backend, error) {
 	apiConfig := apiBackendConfig{
 		model:      config.Model,
