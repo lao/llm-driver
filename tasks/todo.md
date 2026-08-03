@@ -18,7 +18,7 @@ refactor green, run its verification before checking the box.
       incremental fake-runner tests
 - [x] S6: Codex CLI incremental JSONL adapter (delta dedup) + tests
       — checkpoint: full race suite
-- [ ] S7: four-target streaming contract suite in `contract_test.go`
+- [x] S7: four-target streaming contract suite in `contract_test.go`
 - [ ] S8: `examples/switchable --stream`, README, `doc.go`
 - [ ] S9: final verification: gofmt, build, vet, test, race, cover, example
       build, stale-identifier grep
