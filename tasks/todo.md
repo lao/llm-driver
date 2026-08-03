@@ -12,7 +12,7 @@ refactor green, run its verification before checking the box.
 - [x] S2: Anthropic Messages streaming adapter + SSE fixture tests
       — checkpoint: reassess seam before replicating
 - [x] S3: OpenAI Responses streaming adapter + SSE fixture tests
-- [ ] S4: streaming CLI subprocess runner (pipe stdout, wait, kill on
+- [x] S4: streaming CLI subprocess runner (pipe stdout, wait, kill on
       close/cancel) + hygiene tests under `-race`
 - [ ] S5: Claude CLI stream-json adapter (`--include-partial-messages`) +
       incremental fake-runner tests

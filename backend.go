@@ -18,10 +18,11 @@ type apiBackendConfig struct {
 }
 
 type cliBackendConfig struct {
-	model  string
-	path   string
-	args   []string
-	runner commandRunner
+	model        string
+	path         string
+	args         []string
+	runner       commandRunner
+	streamRunner streamingCommandRunner
 }
 
 func buildBackend(config Config, runner commandRunner) (backend, error) {
