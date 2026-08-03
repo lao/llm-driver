@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 const maxCodexEventSize = 16 << 20
@@ -147,6 +148,13 @@ func (p *codexCLIStreamParser) event(line []byte) (string, error) {
 		}
 		if seen >= len(event.Item.Text) {
 			return "", nil
+		}
+		// The cumulative branch assumes prior events are byte-aligned so the
+		// already-emitted prefix ends on a rune boundary of the current text.
+		// A misaligned event would split a UTF-8 rune; enforce the assumption
+		// rather than emit corrupted output.
+		if !utf8.RuneStart(event.Item.Text[seen]) {
+			return "", codexCLIParseError("generate_stream", fmt.Errorf("Codex CLI agent message %q is not byte-aligned at offset %d", event.Item.ID, seen))
 		}
 		p.record(event.Item.ID, len(event.Item.Text))
 		return event.Item.Text[seen:], nil
