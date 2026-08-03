@@ -23,7 +23,23 @@
 //	}
 //	fmt.Println(response.Text)
 //
+// GenerateStream runs the same request incrementally and ends in the same
+// normalized Response:
+//
+//	stream, err := client.GenerateStream(ctx, request)
+//	if err != nil {
+//		return err
+//	}
+//	defer stream.Close()
+//
+//	for stream.Next() {
+//		fmt.Print(stream.Current().Text)
+//	}
+//	response, err := stream.Response()
+//
 // Changing Config is sufficient to select Claude API, Claude CLI, OpenAI API,
 // or Codex CLI. CLI targets use local authentication and may not support every
-// hosted-API control, including an exact maximum output-token limit.
+// hosted-API control, including an exact maximum output-token limit. Chunk
+// granularity is target-defined: the CLI flavors may deliver fewer, larger
+// chunks than the hosted APIs.
 package llmwrapper

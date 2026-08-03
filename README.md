@@ -56,6 +56,42 @@ func main() {
 }
 ```
 
+## Stream
+
+`GenerateStream` runs the same request incrementally and ends in the same
+normalized `Response`:
+
+```go
+stream, err := client.GenerateStream(context.Background(), llmwrapper.Request{
+	System:    "Answer concisely.",
+	Messages:  []llmwrapper.Message{llmwrapper.User("What is dependency inversion?")},
+	MaxTokens: 1024,
+})
+if err != nil {
+	log.Fatal(err)
+}
+defer stream.Close()
+
+for stream.Next() {
+	fmt.Print(stream.Current().Text)
+}
+
+response, err := stream.Response()
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(response.Usage.OutputTokens)
+```
+
+`Next` reports false at the end of the stream and on failure; `Err`
+distinguishes the two. `Response` returns the final result once the stream is
+exhausted, with text equal to the concatenation of every chunk. `Close` aborts
+an in-flight stream, is idempotent, and may be called while another goroutine
+is inside `Next`. Cancelling the context terminates the stream.
+
+The same loop works for all four targets. Chunk granularity is
+target-defined and is not normalized: see the CLI differences below.
+
 To switch targets, change only `Config`:
 
 ```go
@@ -87,6 +123,14 @@ go run ./examples/switchable \
   --prompt "Explain dependency inversion in one paragraph"
 ```
 
+Add `--stream` to print the response as it arrives:
+
+```bash
+go run ./examples/switchable \
+  --provider claude --flavor cli --model claude-sonnet-4-5 \
+  --stream --prompt "Explain dependency inversion in one paragraph"
+```
+
 Run `go run ./examples/switchable --help` for all options. Use
 `--provider claude --flavor api` (and a Claude model), for example, without
 changing the example's generation code.
@@ -110,8 +154,9 @@ values are available. Use `errors.Is` for sentinels such as
 
 ## Scope and CLI differences
 
-The shared contract is non-streaming, text-only generation with system text,
-multi-turn user/assistant messages, normalized text, and available usage.
+The shared contract is text-only generation, batch or streaming, with system
+text, multi-turn user/assistant messages, normalized text, and available
+usage.
 
 The CLI flavors intentionally wrap agent CLIs, not byte-for-byte equivalents of
 the hosted APIs:
@@ -129,9 +174,13 @@ the hosted APIs:
   so local authentication works. Codex's read-only sandbox prevents writes, not
   reads; isolate the host process when prompts are not trusted.
 - Usage fields are populated only when a target reports them.
+- Streaming chunk granularity is target-defined, like `MaxTokens`. The hosted
+  APIs and `claude -p --output-format stream-json --include-partial-messages`
+  produce token-sized deltas. `codex exec --json` publishes agent messages per
+  item on some versions, so a whole answer can arrive as one large chunk.
 
-Streaming, tool/function calling, images, structured output, retries, automatic
-fallback, and persisted conversations are outside this library's current scope.
+Tool/function calling, images, structured output, retries, automatic fallback,
+and persisted conversations are outside this library's current scope.
 
 ## Develop
 
@@ -144,7 +193,7 @@ go test -race ./...
 go vet ./...
 ```
 
-The CLI flavors' flags (`claude -p --output-format json ...` and
+The CLI flavors' flags (`claude -p --output-format json|stream-json ...` and
 `codex exec --json ...`) cannot be validated by the offline suite because it
 injects a fake process runner. An opt-in smoke test launches the real binaries
 so a renamed or removed flag surfaces instead of failing only at runtime. It is

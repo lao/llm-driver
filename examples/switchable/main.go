@@ -19,6 +19,7 @@ const defaultMaxTokens = 1024
 type parsedOptions struct {
 	config  llmwrapper.Config
 	request llmwrapper.Request
+	stream  bool
 }
 
 func main() {
@@ -48,11 +49,40 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 	if err != nil {
 		return err
 	}
+	if parsed.stream {
+		return generateStream(ctx, client, parsed.request, stdout)
+	}
+
 	response, err := client.Generate(ctx, parsed.request)
 	if err != nil {
 		return err
 	}
 	_, err = fmt.Fprintln(stdout, response.Text)
+	return err
+}
+
+// generateStream prints chunks as they arrive. The final output matches the
+// non-streaming path: the chunks concatenate to the same text, and Response
+// still reports any failure the stream ended with.
+func generateStream(ctx context.Context, client *llmwrapper.Client, request llmwrapper.Request, stdout io.Writer) error {
+	stream, err := client.GenerateStream(ctx, request)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+
+	for stream.Next() {
+		if _, err := io.WriteString(stdout, stream.Current().Text); err != nil {
+			return err
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return err
+	}
+	if _, err := stream.Response(); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(stdout)
 	return err
 }
 
@@ -64,8 +94,9 @@ func parseOptions(args []string, output io.Writer) (parsedOptions, error) {
 	model := flags.String("model", "", "provider model name (required)")
 	prompt := flags.String("prompt", "", "text prompt to send (required)")
 	maxTokens := flags.Int("max-tokens", defaultMaxTokens, "maximum output tokens (API flavors; default 1024)")
+	stream := flags.Bool("stream", false, "print response text incrementally as it arrives")
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: switchable --provider <claude|openai> --flavor <api|cli> --model <name> --prompt <text> [--max-tokens <n>]")
+		fmt.Fprintln(output, "Usage: switchable --provider <claude|openai> --flavor <api|cli> --model <name> --prompt <text> [--max-tokens <n>] [--stream]")
 		fmt.Fprintln(output)
 		flags.PrintDefaults()
 		fmt.Fprintln(output, "\nAuthentication:")
@@ -108,6 +139,7 @@ func parseOptions(args []string, output io.Writer) (parsedOptions, error) {
 			Messages:  []llmwrapper.Message{llmwrapper.User(*prompt)},
 			MaxTokens: *maxTokens,
 		},
+		stream: *stream,
 	}, nil
 }
 
