@@ -1,4 +1,4 @@
-package llmwrapper
+package llmdriver
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/llm-driver/internal/core"
 )
 
 // newSSETestServer serves one text/event-stream response built from raw event

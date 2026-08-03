@@ -1,4 +1,4 @@
-# Plan: llmwrapper streaming support
+# Plan: llm-driver streaming support
 
 **Status:** approved 2026-08-03 (autonomous run)
 

@@ -1,10 +1,10 @@
-package llmwrapper
+package llmdriver
 
 import (
 	"context"
 
-	"github.com/lao/llmwrapper/internal/backends"
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/llm-driver/internal/backends"
+	"github.com/lao/llm-driver/internal/core"
 )
 
 // Client sends provider-neutral generation requests through one configured

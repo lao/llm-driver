@@ -1,8 +1,8 @@
-# Spec: llmwrapper streaming support
+# Spec: llm-driver streaming support
 
 ## Objective
 
-Add streaming text generation to `llmwrapper` so a caller can consume
+Add streaming text generation to `llm-driver` so a caller can consume
 incremental text deltas — and then the same normalized final `Response` that
 `Generate` returns — from any of the four existing targets without changing
 call sites when the target changes:
@@ -24,7 +24,7 @@ is stable and must not change shape or behavior.
 
 The public types now live in `internal/core` with root-package aliases keeping
 the API surface unchanged. The committed module path remains
-`github.com/lao/llmwrapper`, matching the existing repository; no compatibility
+`github.com/lao/llm-driver`, matching the existing repository; no compatibility
 package or deprecated aliases for the former package are included.
 
 ### Public API additions
@@ -33,10 +33,10 @@ The library keeps owning all public types. Neither provider SDK leaks through
 the boundary. The streaming surface mirrors both official SDKs' iterator style:
 
 ```go
-stream, err := client.GenerateStream(ctx, llmwrapper.Request{
+stream, err := client.GenerateStream(ctx, llmdriver.Request{
 	System:    "Answer concisely.",
 	MaxTokens: 1024,
-	Messages:  []llmwrapper.Message{llmwrapper.User("Hello")},
+	Messages:  []llmdriver.Message{llmdriver.User("Hello")},
 })
 if err != nil {
 	return err
@@ -186,7 +186,7 @@ go.mod / go.sum                 module metadata and pinned SDKs
 doc.go                          package documentation and short example
 client.go                       Client, New, target selection, Generate
 stream.go                       Stream, GenerateStream, accumulation plumbing
-llmwrapper.go                   public aliases for the internal/core types (incl. Chunk)
+llmdriver.go                   public aliases for the internal/core types (incl. Chunk)
 *_test.go                       contract and adapter tests via the public API
 stream_test.go                  Stream contract and accumulation tests
 internal/core/config.go         Config and provider/flavor validation

@@ -8,7 +8,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/llm-driver/internal/core"
 )
 
 func TestNormalizeAnthropicErrorPreservesMessage(t *testing.T) {

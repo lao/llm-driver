@@ -14,7 +14,7 @@ type Backend interface {
 
 // ErrStreamDone is the sentinel a ChunkStream returns when no chunk remains.
 // It never reaches callers of the public API.
-var ErrStreamDone = errors.New("llmwrapper: stream done")
+var ErrStreamDone = errors.New("llmdriver: stream done")
 
 // ChunkStream is the per-adapter half of streaming: it maps provider events to
 // chunks and to a final Response. Its methods are exported because backend

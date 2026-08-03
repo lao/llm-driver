@@ -1,4 +1,4 @@
-package llmwrapper
+package llmdriver
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/llm-driver/internal/core"
 )
 
 // Stream iterates response text chunks and terminates in a normalized

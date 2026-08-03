@@ -10,7 +10,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/llm-driver/internal/core"
 )
 
 type anthropicBackend struct {

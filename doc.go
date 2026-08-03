@@ -1,21 +1,21 @@
-// Package llmwrapper provides one text-generation API backed by switchable
+// Package llmdriver provides one text-generation API backed by switchable
 // Claude and OpenAI API or CLI targets.
 //
 // Construct a client with an explicit provider, flavor, and model, then send a
 // provider-neutral request:
 //
-//	client, err := llmwrapper.New(llmwrapper.Config{
-//		Provider: llmwrapper.ProviderOpenAI,
-//		Flavor:   llmwrapper.FlavorCLI,
+//	client, err := llmdriver.New(llmdriver.Config{
+//		Provider: llmdriver.ProviderOpenAI,
+//		Flavor:   llmdriver.FlavorCLI,
 //		Model:    "gpt-5.6-sol",
 //	})
 //	if err != nil {
 //		return err
 //	}
 //
-//	response, err := client.Generate(ctx, llmwrapper.Request{
+//	response, err := client.Generate(ctx, llmdriver.Request{
 //		System:    "Answer concisely.",
-//		Messages:  []llmwrapper.Message{llmwrapper.User("Hello")},
+//		Messages:  []llmdriver.Message{llmdriver.User("Hello")},
 //		MaxTokens: 1024,
 //	})
 //	if err != nil {
@@ -42,4 +42,4 @@
 // hosted-API control, including an exact maximum output-token limit. Chunk
 // granularity is target-defined: the CLI flavors may deliver fewer, larger
 // chunks than the hosted APIs.
-package llmwrapper
+package llmdriver

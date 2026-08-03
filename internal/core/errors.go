@@ -8,11 +8,11 @@ import (
 
 var (
 	// ErrInvalidConfig identifies client configuration rejected by New.
-	ErrInvalidConfig = errors.New("llmwrapper: invalid config")
+	ErrInvalidConfig = errors.New("llmdriver: invalid config")
 	// ErrInvalidRequest identifies a request rejected before provider invocation.
-	ErrInvalidRequest = errors.New("llmwrapper: invalid request")
+	ErrInvalidRequest = errors.New("llmdriver: invalid request")
 	// ErrExecutableNotFound identifies a missing provider CLI executable.
-	ErrExecutableNotFound = errors.New("llmwrapper: executable not found")
+	ErrExecutableNotFound = errors.New("llmdriver: executable not found")
 )
 
 // Error adds target and operation context to configuration and runtime failures.
@@ -40,7 +40,7 @@ func (e *Error) Error() string {
 	}
 
 	var b strings.Builder
-	b.WriteString("llmwrapper")
+	b.WriteString("llmdriver")
 	if target := formatTarget(e.Provider, e.Flavor); target != "" {
 		b.WriteString(": ")
 		b.WriteString(target)

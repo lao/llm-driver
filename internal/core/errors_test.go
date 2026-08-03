@@ -20,7 +20,7 @@ func TestErrorIncludesContextAndPreservesCause(t *testing.T) {
 		Err:       cause,
 	}
 
-	for _, want := range []string{"llmwrapper", "openai/api", "generate", "429", "rate_limit", "slow down"} {
+	for _, want := range []string{"llmdriver", "openai/api", "generate", "429", "rate_limit", "slow down"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Error() = %q, missing %q", err.Error(), want)
 		}

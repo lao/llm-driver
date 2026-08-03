@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/llm-driver/internal/core"
 )
 
 // fakeStreamingRunner replays scripted stdout lines through a pipe so streaming
@@ -120,7 +120,7 @@ func TestStreamingCommandMissingExecutable(t *testing.T) {
 
 	_, err := defaultStreamingCommandRunner(
 		context.Background(),
-		"llmwrapper-command-that-does-not-exist",
+		"llmdriver-command-that-does-not-exist",
 		nil,
 		nil,
 	)
@@ -130,7 +130,7 @@ func TestStreamingCommandMissingExecutable(t *testing.T) {
 }
 
 func TestStreamingCommandReadsOutputIncrementally(t *testing.T) {
-	t.Setenv("LLMWRAPPER_STREAM_HELPER", "lines")
+	t.Setenv("LLM_DRIVER_STREAM_HELPER", "lines")
 
 	process, err := defaultStreamingCommandRunner(
 		context.Background(),
@@ -156,8 +156,8 @@ func TestStreamingCommandReadsOutputIncrementally(t *testing.T) {
 
 func TestStreamingCommandCloseTerminatesProcessTree(t *testing.T) {
 	readyPath := filepath.Join(t.TempDir(), "ready")
-	t.Setenv("LLMWRAPPER_STREAM_HELPER", "parent")
-	t.Setenv("LLMWRAPPER_HELPER_READY", readyPath)
+	t.Setenv("LLM_DRIVER_STREAM_HELPER", "parent")
+	t.Setenv("LLM_DRIVER_HELPER_READY", readyPath)
 
 	process, err := defaultStreamingCommandRunner(
 		context.Background(),
@@ -196,7 +196,7 @@ func TestStreamingCommandCloseTerminatesProcessTree(t *testing.T) {
 }
 
 func TestStreamingCommandCancellationIsReported(t *testing.T) {
-	t.Setenv("LLMWRAPPER_STREAM_HELPER", "lines")
+	t.Setenv("LLM_DRIVER_STREAM_HELPER", "lines")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	process, err := defaultStreamingCommandRunner(
@@ -224,7 +224,7 @@ func TestStreamingCommandCancellationIsReported(t *testing.T) {
 }
 
 func TestStreamingCommandReportsExitCodeAndStderr(t *testing.T) {
-	t.Setenv("LLMWRAPPER_STREAM_HELPER", "fail")
+	t.Setenv("LLM_DRIVER_STREAM_HELPER", "fail")
 
 	process, err := defaultStreamingCommandRunner(
 		context.Background(),
@@ -396,12 +396,12 @@ func readHelperPID(t *testing.T, path string) int {
 }
 
 func TestStreamingCommandHelperProcess(t *testing.T) {
-	if os.Getenv("LLMWRAPPER_HELPER_DESCENDANT") == "1" {
+	if os.Getenv("LLM_DRIVER_HELPER_DESCENDANT") == "1" {
 		time.Sleep(30 * time.Second)
 		return
 	}
 
-	switch os.Getenv("LLMWRAPPER_STREAM_HELPER") {
+	switch os.Getenv("LLM_DRIVER_STREAM_HELPER") {
 	case "":
 		return
 	case "fail":
@@ -409,7 +409,7 @@ func TestStreamingCommandHelperProcess(t *testing.T) {
 		os.Exit(9)
 	case "parent":
 		child := exec.Command(os.Args[0], "-test.run=^TestStreamingCommandHelperProcess$")
-		child.Env = append(os.Environ(), "LLMWRAPPER_HELPER_DESCENDANT=1")
+		child.Env = append(os.Environ(), "LLM_DRIVER_HELPER_DESCENDANT=1")
 		// The descendant inherits stdout so close() must rely on WaitDelay
 		// instead of waiting for every holder of the pipe.
 		child.Stdout = os.Stdout
@@ -417,7 +417,7 @@ func TestStreamingCommandHelperProcess(t *testing.T) {
 		if err := child.Start(); err != nil {
 			t.Fatalf("start descendant: %v", err)
 		}
-		if err := os.WriteFile(os.Getenv("LLMWRAPPER_HELPER_READY"), []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
+		if err := os.WriteFile(os.Getenv("LLM_DRIVER_HELPER_READY"), []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
 			t.Fatalf("write ready file: %v", err)
 		}
 		fmt.Fprintln(os.Stdout, "line-1")
@@ -588,7 +588,7 @@ func TestStreamingCommandStartFailureIsReported(t *testing.T) {
 }
 
 func TestStreamingCommandReportsCleanExit(t *testing.T) {
-	t.Setenv("LLMWRAPPER_STREAM_HELPER", "exit")
+	t.Setenv("LLM_DRIVER_STREAM_HELPER", "exit")
 
 	process, err := defaultStreamingCommandRunner(
 		context.Background(),

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/llm-driver/internal/core"
 )
 
 const (
@@ -24,7 +24,7 @@ const (
 	cliFailDrainTimeout = 2 * time.Second
 )
 
-var errCLIOutputTooLarge = errors.New("llmwrapper: CLI output exceeds limit")
+var errCLIOutputTooLarge = errors.New("llmdriver: CLI output exceeds limit")
 
 type boundedBuffer struct {
 	buffer   bytes.Buffer

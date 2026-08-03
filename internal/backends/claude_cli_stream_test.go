@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/llm-driver/internal/core"
 )
 
 // claudeStreamJSONLines mirrors `claude -p --output-format stream-json

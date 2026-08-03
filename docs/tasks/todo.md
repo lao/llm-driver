@@ -1,4 +1,4 @@
-# llmwrapper streaming checklist
+# llm-driver streaming checklist
 
 **Status:** approved 2026-08-03 (autonomous run)
 

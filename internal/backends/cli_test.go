@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/llm-driver/internal/core"
 )
 
 func TestPromptRenderSingleUser(t *testing.T) {
@@ -42,7 +42,7 @@ func TestCommandMissingExecutable(t *testing.T) {
 
 	_, _, _, err := defaultCommandRunner(
 		context.Background(),
-		"llmwrapper-command-that-does-not-exist",
+		"llmdriver-command-that-does-not-exist",
 		nil,
 		nil,
 	)
@@ -52,7 +52,7 @@ func TestCommandMissingExecutable(t *testing.T) {
 }
 
 func TestCommandPreservesDeadline(t *testing.T) {
-	t.Setenv("LLMWRAPPER_HELPER_PROCESS", "sleep")
+	t.Setenv("LLM_DRIVER_HELPER_PROCESS", "sleep")
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
@@ -69,8 +69,8 @@ func TestCommandPreservesDeadline(t *testing.T) {
 
 func TestCommandCancellationDoesNotWaitForDescendant(t *testing.T) {
 	readyPath := filepath.Join(t.TempDir(), "ready")
-	t.Setenv("LLMWRAPPER_HELPER_PROCESS", "parent")
-	t.Setenv("LLMWRAPPER_HELPER_READY", readyPath)
+	t.Setenv("LLM_DRIVER_HELPER_PROCESS", "parent")
+	t.Setenv("LLM_DRIVER_HELPER_READY", readyPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
@@ -131,23 +131,23 @@ func TestCommandCancellationDoesNotWaitForDescendant(t *testing.T) {
 }
 
 func TestCommandHelperProcess(t *testing.T) {
-	if os.Getenv("LLMWRAPPER_HELPER_DESCENDANT") == "1" {
+	if os.Getenv("LLM_DRIVER_HELPER_DESCENDANT") == "1" {
 		time.Sleep(30 * time.Second)
 		return
 	}
 
-	switch os.Getenv("LLMWRAPPER_HELPER_PROCESS") {
+	switch os.Getenv("LLM_DRIVER_HELPER_PROCESS") {
 	case "":
 		return
 	case "parent":
 		child := exec.Command(os.Args[0], "-test.run=^TestCommandHelperProcess$")
-		child.Env = append(os.Environ(), "LLMWRAPPER_HELPER_DESCENDANT=1")
+		child.Env = append(os.Environ(), "LLM_DRIVER_HELPER_DESCENDANT=1")
 		child.Stdout = os.Stdout
 		child.Stderr = os.Stderr
 		if err := child.Start(); err != nil {
 			t.Fatalf("start descendant: %v", err)
 		}
-		if err := os.WriteFile(os.Getenv("LLMWRAPPER_HELPER_READY"), []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
+		if err := os.WriteFile(os.Getenv("LLM_DRIVER_HELPER_READY"), []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
 			t.Fatalf("write ready file: %v", err)
 		}
 	}
