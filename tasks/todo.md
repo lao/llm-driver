@@ -7,7 +7,7 @@
 Dependency-ordered. Each task: failing test first, minimum code to pass,
 refactor green, run its verification before checking the box.
 
-- [ ] S1: `stream.go` core — `Stream`/`Chunk` public API, `chunkStream` seam,
+- [x] S1: `stream.go` core — `Stream`/`Chunk` public API, `chunkStream` seam,
       `Client.GenerateStream`, scripted-fake contract tests
 - [ ] S2: Anthropic Messages streaming adapter + SSE fixture tests
       — checkpoint: reassess seam before replicating

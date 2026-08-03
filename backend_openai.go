@@ -162,3 +162,8 @@ func normalizeOpenAIError(err error) error {
 	}
 	return normalized
 }
+
+// TODO(S3): replaced by the Responses streaming adapter.
+func (b *openAIBackend) generateStream(context.Context, Request) (chunkStream, error) {
+	return nil, errors.New("not implemented")
+}

@@ -186,3 +186,8 @@ func codexCLIResultError(code string, message string) error {
 		Message:   strings.TrimSpace(message),
 	}
 }
+
+// TODO(S6): replaced by the incremental JSONL adapter.
+func (b *codexCLIBackend) generateStream(context.Context, Request) (chunkStream, error) {
+	return nil, errors.New("not implemented")
+}

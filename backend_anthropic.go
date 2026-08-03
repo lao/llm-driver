@@ -110,3 +110,8 @@ func normalizeAnthropicCompletionReason(reason anthropic.StopReason) CompletionR
 		return ""
 	}
 }
+
+// TODO(S2): replaced by the Messages streaming adapter.
+func (b *anthropicBackend) generateStream(context.Context, Request) (chunkStream, error) {
+	return nil, errors.New("not implemented")
+}

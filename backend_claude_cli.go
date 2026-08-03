@@ -3,6 +3,7 @@ package llmwrapper
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -126,4 +127,9 @@ func claudeCLIErrorCode(result claudeCLIResult) string {
 		return result.Type
 	}
 	return "unsuccessful_result"
+}
+
+// TODO(S5): replaced by the stream-json adapter.
+func (b *claudeCLIBackend) generateStream(context.Context, Request) (chunkStream, error) {
+	return nil, errors.New("not implemented")
 }

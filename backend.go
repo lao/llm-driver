@@ -7,6 +7,7 @@ import (
 
 type backend interface {
 	generate(context.Context, Request) (*Response, error)
+	generateStream(context.Context, Request) (chunkStream, error)
 }
 
 type apiBackendConfig struct {
