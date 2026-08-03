@@ -1,6 +1,6 @@
-package llmwrapper
+package llmdriver
 
-import "github.com/lao/llmwrapper/internal/core"
+import "github.com/lao/llm-driver/internal/core"
 
 // The package's data types live in internal/core so backend implementations
 // can share them without an import cycle. These aliases keep the public API

@@ -11,14 +11,14 @@ import (
 	"strings"
 	"syscall"
 
-	llmwrapper "github.com/lao/llmwrapper"
+	llmdriver "github.com/lao/llm-driver"
 )
 
 const defaultMaxTokens = 1024
 
 type parsedOptions struct {
-	config  llmwrapper.Config
-	request llmwrapper.Request
+	config  llmdriver.Config
+	request llmdriver.Request
 	stream  bool
 }
 
@@ -45,7 +45,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return err
 	}
 
-	client, err := llmwrapper.New(parsed.config)
+	client, err := llmdriver.New(parsed.config)
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 // generateStream prints chunks as they arrive. The final output matches the
 // non-streaming path: the chunks concatenate to the same text, and Response
 // still reports any failure the stream ended with.
-func generateStream(ctx context.Context, client *llmwrapper.Client, request llmwrapper.Request, stdout io.Writer) error {
+func generateStream(ctx context.Context, client *llmdriver.Client, request llmdriver.Request, stdout io.Writer) error {
 	stream, err := client.GenerateStream(ctx, request)
 	if err != nil {
 		return err
@@ -130,25 +130,25 @@ func parseOptions(args []string, output io.Writer) (parsedOptions, error) {
 	}
 
 	return parsedOptions{
-		config: llmwrapper.Config{
+		config: llmdriver.Config{
 			Provider: provider,
 			Flavor:   flavor,
 			Model:    *model,
 		},
-		request: llmwrapper.Request{
-			Messages:  []llmwrapper.Message{llmwrapper.User(*prompt)},
+		request: llmdriver.Request{
+			Messages:  []llmdriver.Message{llmdriver.User(*prompt)},
 			MaxTokens: *maxTokens,
 		},
 		stream: *stream,
 	}, nil
 }
 
-func parseProvider(value string) (llmwrapper.Provider, error) {
+func parseProvider(value string) (llmdriver.Provider, error) {
 	switch value {
-	case string(llmwrapper.ProviderClaude):
-		return llmwrapper.ProviderClaude, nil
-	case string(llmwrapper.ProviderOpenAI):
-		return llmwrapper.ProviderOpenAI, nil
+	case string(llmdriver.ProviderClaude):
+		return llmdriver.ProviderClaude, nil
+	case string(llmdriver.ProviderOpenAI):
+		return llmdriver.ProviderOpenAI, nil
 	case "":
 		return "", errors.New("--provider is required")
 	default:
@@ -156,12 +156,12 @@ func parseProvider(value string) (llmwrapper.Provider, error) {
 	}
 }
 
-func parseFlavor(value string) (llmwrapper.Flavor, error) {
+func parseFlavor(value string) (llmdriver.Flavor, error) {
 	switch value {
-	case string(llmwrapper.FlavorAPI):
-		return llmwrapper.FlavorAPI, nil
-	case string(llmwrapper.FlavorCLI):
-		return llmwrapper.FlavorCLI, nil
+	case string(llmdriver.FlavorAPI):
+		return llmdriver.FlavorAPI, nil
+	case string(llmdriver.FlavorCLI):
+		return llmdriver.FlavorCLI, nil
 	case "":
 		return "", errors.New("--flavor is required")
 	default:

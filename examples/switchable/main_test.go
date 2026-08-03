@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	llmwrapper "github.com/lao/llmwrapper"
+	llmdriver "github.com/lao/llm-driver"
 )
 
 func TestParseOptionsBuildsConfigAndRequest(t *testing.T) {
@@ -24,16 +24,16 @@ func TestParseOptionsBuildsConfigAndRequest(t *testing.T) {
 		t.Fatalf("parseOptions(): %v", err)
 	}
 
-	wantConfig := (llmwrapper.Config{
-		Provider: llmwrapper.ProviderOpenAI,
-		Flavor:   llmwrapper.FlavorCLI,
+	wantConfig := (llmdriver.Config{
+		Provider: llmdriver.ProviderOpenAI,
+		Flavor:   llmdriver.FlavorCLI,
 		Model:    "gpt-test",
 	})
 	if !reflect.DeepEqual(parsed.config, wantConfig) {
 		t.Fatalf("config = %+v, want %+v", parsed.config, wantConfig)
 	}
-	wantRequest := (llmwrapper.Request{
-		Messages:  []llmwrapper.Message{llmwrapper.User("Say hello")},
+	wantRequest := (llmdriver.Request{
+		Messages:  []llmdriver.Message{llmdriver.User("Say hello")},
 		MaxTokens: 256,
 	})
 	if len(parsed.request.Messages) != 1 || parsed.request.Messages[0] != wantRequest.Messages[0] || parsed.request.MaxTokens != wantRequest.MaxTokens {

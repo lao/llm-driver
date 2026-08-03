@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lao/llmwrapper/internal/core"
+	"github.com/lao/llm-driver/internal/core"
 )
 
 // contractTarget is one of the four provider/flavor combinations every

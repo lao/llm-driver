@@ -1,4 +1,4 @@
-package llmwrapper
+package llmdriver
 
 import (
 	"encoding/json"

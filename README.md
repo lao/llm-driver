@@ -1,6 +1,6 @@
-# llmwrapper
+# llm-driver
 
-`llmwrapper` is a small Go library with one text-generation API and four
+`llm-driver` is a small Go library with one text-generation API and four
 switchable targets:
 
 | Provider | Flavor | Target | Authentication |
@@ -15,7 +15,7 @@ Changing the provider, flavor, or model does not change application call sites.
 ## Install
 
 ```bash
-go get github.com/lao/llmwrapper
+go get github.com/lao/llm-driver
 ```
 
 The module requires Go 1.24 or later.
@@ -30,22 +30,22 @@ import (
 	"fmt"
 	"log"
 
-	llmwrapper "github.com/lao/llmwrapper"
+	llmdriver "github.com/lao/llm-driver"
 )
 
 func main() {
-	client, err := llmwrapper.New(llmwrapper.Config{
-		Provider: llmwrapper.ProviderOpenAI,
-		Flavor:   llmwrapper.FlavorCLI,
+	client, err := llmdriver.New(llmdriver.Config{
+		Provider: llmdriver.ProviderOpenAI,
+		Flavor:   llmdriver.FlavorCLI,
 		Model:    "gpt-5.6-sol",
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	response, err := client.Generate(context.Background(), llmwrapper.Request{
+	response, err := client.Generate(context.Background(), llmdriver.Request{
 		System:    "Answer concisely.",
-		Messages:  []llmwrapper.Message{llmwrapper.User("What is dependency inversion?")},
+		Messages:  []llmdriver.Message{llmdriver.User("What is dependency inversion?")},
 		MaxTokens: 1024,
 	})
 	if err != nil {
@@ -62,9 +62,9 @@ func main() {
 normalized `Response`:
 
 ```go
-stream, err := client.GenerateStream(context.Background(), llmwrapper.Request{
+stream, err := client.GenerateStream(context.Background(), llmdriver.Request{
 	System:    "Answer concisely.",
-	Messages:  []llmwrapper.Message{llmwrapper.User("What is dependency inversion?")},
+	Messages:  []llmdriver.Message{llmdriver.User("What is dependency inversion?")},
 	MaxTokens: 1024,
 })
 if err != nil {
@@ -96,16 +96,16 @@ To switch targets, change only `Config`:
 
 ```go
 // Claude API
-llmwrapper.Config{Provider: llmwrapper.ProviderClaude, Flavor: llmwrapper.FlavorAPI, Model: "claude-sonnet-4-5"}
+llmdriver.Config{Provider: llmdriver.ProviderClaude, Flavor: llmdriver.FlavorAPI, Model: "claude-sonnet-4-5"}
 
 // Local Claude CLI
-llmwrapper.Config{Provider: llmwrapper.ProviderClaude, Flavor: llmwrapper.FlavorCLI, Model: "claude-sonnet-4-5"}
+llmdriver.Config{Provider: llmdriver.ProviderClaude, Flavor: llmdriver.FlavorCLI, Model: "claude-sonnet-4-5"}
 
 // OpenAI API
-llmwrapper.Config{Provider: llmwrapper.ProviderOpenAI, Flavor: llmwrapper.FlavorAPI, Model: "gpt-5.6-sol"}
+llmdriver.Config{Provider: llmdriver.ProviderOpenAI, Flavor: llmdriver.FlavorAPI, Model: "gpt-5.6-sol"}
 
 // Local Codex CLI
-llmwrapper.Config{Provider: llmwrapper.ProviderOpenAI, Flavor: llmwrapper.FlavorCLI, Model: "gpt-5.6-sol"}
+llmdriver.Config{Provider: llmdriver.ProviderOpenAI, Flavor: llmdriver.FlavorCLI, Model: "gpt-5.6-sol"}
 ```
 
 The request and `Generate` call stay the same. Models are always explicit; the
@@ -200,7 +200,7 @@ so a renamed or removed flag surfaces instead of failing only at runtime. It is
 excluded by default and skips when a binary or model is missing:
 
 ```bash
-LLMWRAPPER_CLAUDE_CLI_MODEL=claude-sonnet-4-5 \
-LLMWRAPPER_CODEX_CLI_MODEL=gpt-5.6-sol \
+LLM_DRIVER_CLAUDE_CLI_MODEL=claude-sonnet-4-5 \
+LLM_DRIVER_CODEX_CLI_MODEL=gpt-5.6-sol \
   go test -tags integration -run 'CLIIntegration' .
 ```
