@@ -16,6 +16,10 @@ import (
 const (
 	maxCLIOutputBytes   = 16 << 20
 	cliCommandWaitDelay = 250 * time.Millisecond
+	// cliFailDrainTimeout bounds the best-effort drain-and-stamp on the failure
+	// path so a CLI that emits its final line and then hangs (no more bytes, no
+	// exit, no stdout EOF) cannot hold recv open forever.
+	cliFailDrainTimeout = 2 * time.Second
 )
 
 var errCLIOutputTooLarge = errors.New("llmwrapper: CLI output exceeds limit")
@@ -283,26 +287,43 @@ func (s *cliChunkStream) close() error {
 // fail records a terminal parse failure and, for parity with the batch path,
 // stamps the process exit code onto it when the CLI also exited nonzero.
 // Remaining output is drained first: waiting on a process whose stdout is not
-// being read would deadlock. The drain is bounded like every other read on this
-// path, so a CLI that keeps writing after the line that failed the stream
-// cannot hold this call open; past the limit the exit code is not worth waiting
-// for, and close terminates the process.
+// being read would deadlock. Both the byte drain and the timer bound the wait:
+// a CLI that keeps writing hits the byte limit, and a CLI that emits its final
+// line then idles without exiting (no stdout EOF) hits cliFailDrainTimeout. On
+// either bound the exit code is not worth waiting for, and close terminates the
+// process (its cancel also unblocks the drain goroutine).
 func (s *cliChunkStream) fail(err error) error {
 	s.failure = err
 
-	drained, _ := io.Copy(io.Discard, io.LimitReader(s.process.stdout(), maxCLIOutputBytes))
-	if drained >= maxCLIOutputBytes {
+	done := make(chan int, 1)
+	go func() {
+		drained, _ := io.Copy(io.Discard, io.LimitReader(s.process.stdout(), maxCLIOutputBytes))
+		if drained >= maxCLIOutputBytes {
+			done <- 0
+			return
+		}
+		exitCode, _, waitErr := s.process.wait()
+		if waitErr != nil {
+			exitCode = 0
+		}
+		done <- exitCode
+	}()
+
+	timer := time.NewTimer(cliFailDrainTimeout)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return err
+	case exitCode := <-done:
+		if exitCode == 0 {
+			return err
+		}
+		var contextual *Error
+		if errors.As(err, &contextual) && contextual.Status == 0 {
+			contextual.Status = exitCode
+		}
 		return err
 	}
-	exitCode, _, waitErr := s.process.wait()
-	if waitErr != nil || exitCode == 0 {
-		return err
-	}
-	var contextual *Error
-	if errors.As(err, &contextual) && contextual.Status == 0 {
-		contextual.Status = exitCode
-	}
-	return err
 }
 
 func (s *cliChunkStream) exit() error {
