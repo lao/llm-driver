@@ -1,6 +1,7 @@
 package llmwrapper
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -289,6 +290,74 @@ func TestCLIChunkStreamRejectsOversizedLine(t *testing.T) {
 	var target *Error
 	if !errors.As(err, &target) || target.Operation != "generate_stream" || target.Provider != ProviderClaude {
 		t.Fatalf("recv() error = %#v, want normalized *Error", err)
+	}
+}
+
+// endlessCLIProcess writes one line and then never stops, and its wait blocks
+// until stdout is closed: the shape of a CLI that keeps producing output after
+// the stream has already failed and has not exited on its own.
+type endlessCLIProcess struct {
+	reader    *io.PipeReader
+	waited    chan struct{}
+	closeOnce sync.Once
+}
+
+func newEndlessCLIProcess(first string) *endlessCLIProcess {
+	reader, writer := io.Pipe()
+	process := &endlessCLIProcess{reader: reader, waited: make(chan struct{})}
+	go func() {
+		if _, err := io.WriteString(writer, first+"\n"); err != nil {
+			return
+		}
+		filler := bytes.Repeat([]byte("x"), 64*1024)
+		for {
+			if _, err := writer.Write(filler); err != nil {
+				return
+			}
+		}
+	}()
+	return process
+}
+
+func (p *endlessCLIProcess) stdout() io.Reader { return p.reader }
+
+func (p *endlessCLIProcess) wait() (int, []byte, error) {
+	<-p.waited
+	return 0, nil, nil
+}
+
+func (p *endlessCLIProcess) close() error {
+	p.closeOnce.Do(func() {
+		_ = p.reader.CloseWithError(io.ErrClosedPipe)
+		close(p.waited)
+	})
+	return nil
+}
+
+func TestCLIChunkStreamBoundsDrainAfterFailure(t *testing.T) {
+	t.Parallel()
+
+	// A CLI that keeps writing after the line that failed the stream must not be
+	// able to hold recv open: the post-failure drain is bounded like every other
+	// read on this path.
+	process := newEndlessCLIProcess("not-json")
+	stream := newCLIChunkStream(ProviderClaude, process, &claudeCLIStreamParser{model: "claude-test"})
+	defer stream.close()
+
+	failed := make(chan error, 1)
+	go func() {
+		_, err := stream.recv()
+		failed <- err
+	}()
+
+	select {
+	case err := <-failed:
+		var target *Error
+		if !errors.As(err, &target) || target.Operation != "generate_stream" {
+			t.Fatalf("recv() error = %#v, want normalized *Error", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("recv() did not return: the drain after a failed line is unbounded")
 	}
 }
 

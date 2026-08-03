@@ -283,11 +283,17 @@ func (s *cliChunkStream) close() error {
 // fail records a terminal parse failure and, for parity with the batch path,
 // stamps the process exit code onto it when the CLI also exited nonzero.
 // Remaining output is drained first: waiting on a process whose stdout is not
-// being read would deadlock.
+// being read would deadlock. The drain is bounded like every other read on this
+// path, so a CLI that keeps writing after the line that failed the stream
+// cannot hold this call open; past the limit the exit code is not worth waiting
+// for, and close terminates the process.
 func (s *cliChunkStream) fail(err error) error {
 	s.failure = err
 
-	_, _ = io.Copy(io.Discard, s.process.stdout())
+	drained, _ := io.Copy(io.Discard, io.LimitReader(s.process.stdout(), maxCLIOutputBytes))
+	if drained >= maxCLIOutputBytes {
+		return err
+	}
 	exitCode, _, waitErr := s.process.wait()
 	if waitErr != nil || exitCode == 0 {
 		return err
