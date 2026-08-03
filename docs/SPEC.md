@@ -23,9 +23,9 @@ The base non-streaming API (`New`, `Generate`, `Request`, `Response`, `Error`)
 is stable and must not change shape or behavior.
 
 The public types now live in `internal/core` with root-package aliases keeping
-the API surface unchanged. The committed module path remains
-`github.com/lao/llm-driver`, matching the existing repository; no compatibility
-package or deprecated aliases for the former package are included.
+the API surface unchanged. The committed module path is
+`github.com/lao/llm-driver`; no compatibility package or deprecated aliases for
+the former path are included.
 
 ### Public API additions
 
