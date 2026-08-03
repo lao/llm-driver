@@ -20,5 +20,5 @@ refactor green, run its verification before checking the box.
       — checkpoint: full race suite
 - [x] S7: four-target streaming contract suite in `contract_test.go`
 - [x] S8: `examples/switchable --stream`, README, `doc.go`
-- [ ] S9: final verification: gofmt, build, vet, test, race, cover, example
+- [x] S9: final verification: gofmt, build, vet, test, race, cover, example
       build, stale-identifier grep

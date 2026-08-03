@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"testing"
+	"time"
 )
 
 // newSSETestServer serves one text/event-stream response built from raw event
@@ -357,5 +359,83 @@ func TestStreamFinishError(t *testing.T) {
 	}
 	if !errors.Is(stream.Err(), failure) {
 		t.Fatalf("Err() = %v after failed Response()", stream.Err())
+	}
+}
+
+func TestStreamCloseIsSafeConcurrentlyWithNext(t *testing.T) {
+	t.Parallel()
+
+	// The runner holds output after the first chunk, so Next is genuinely
+	// blocked when Close runs.
+	runner := &fakeStreamingRunner{
+		lines:    claudeStreamJSONLines(),
+		holdFrom: 4,
+		gate:     make(chan struct{}),
+	}
+	client := newCLIStreamClient(Config{
+		Provider: ProviderClaude,
+		Flavor:   FlavorCLI,
+		Model:    "claude-test",
+	}, runner.run)
+
+	stream, err := client.GenerateStream(context.Background(), streamRequest())
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	if !stream.Next() {
+		t.Fatalf("Next() = false: %v", stream.Err())
+	}
+
+	advanced := make(chan bool, 1)
+	go func() { advanced <- stream.Next() }()
+
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close(): %v", err)
+	}
+	select {
+	case got := <-advanced:
+		if got {
+			t.Fatal("Next() = true after a concurrent Close()")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Next() did not return after Close()")
+	}
+}
+
+func TestStreamCloseLeavesNoGoroutines(t *testing.T) {
+	// Not parallel: the goroutine count is process-wide.
+	baseline := runtime.NumGoroutine()
+
+	for range 20 {
+		runner := &fakeStreamingRunner{
+			lines:    claudeStreamJSONLines(),
+			holdFrom: 4,
+			gate:     make(chan struct{}),
+		}
+		client := newCLIStreamClient(Config{
+			Provider: ProviderClaude,
+			Flavor:   FlavorCLI,
+			Model:    "claude-test",
+		}, runner.run)
+
+		stream, err := client.GenerateStream(context.Background(), streamRequest())
+		if err != nil {
+			t.Fatalf("GenerateStream(): %v", err)
+		}
+		if !stream.Next() {
+			t.Fatalf("Next() = false: %v", stream.Err())
+		}
+		// Abandon the stream mid-flight; Close must release everything it started.
+		if err := stream.Close(); err != nil {
+			t.Fatalf("Close(): %v", err)
+		}
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for runtime.NumGoroutine() > baseline+2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines = %d, baseline %d", runtime.NumGoroutine(), baseline)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
