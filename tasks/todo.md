@@ -14,7 +14,7 @@ refactor green, run its verification before checking the box.
 - [x] S3: OpenAI Responses streaming adapter + SSE fixture tests
 - [x] S4: streaming CLI subprocess runner (pipe stdout, wait, kill on
       close/cancel) + hygiene tests under `-race`
-- [ ] S5: Claude CLI stream-json adapter (`--include-partial-messages`) +
+- [x] S5: Claude CLI stream-json adapter (`--include-partial-messages`) +
       incremental fake-runner tests
 - [ ] S6: Codex CLI incremental JSONL adapter (delta dedup) + tests
       — checkpoint: full race suite
