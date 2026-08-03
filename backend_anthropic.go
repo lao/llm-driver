@@ -8,6 +8,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 )
 
 type anthropicBackend struct {
@@ -33,6 +34,25 @@ func newAnthropicBackend(config apiBackendConfig) *anthropicBackend {
 }
 
 func (b *anthropicBackend) generate(ctx context.Context, request Request) (*Response, error) {
+	message, err := b.client.Messages.New(ctx, b.params(request))
+	if err != nil {
+		return nil, normalizeAnthropicError(err)
+	}
+	return anthropicResponse(message), nil
+}
+
+func (b *anthropicBackend) generateStream(ctx context.Context, request Request) (chunkStream, error) {
+	stream := b.client.Messages.NewStreaming(ctx, b.params(request))
+	// NewStreaming records transport and non-2xx failures before any event is
+	// read, so a failed start is reported by GenerateStream rather than Next.
+	if err := stream.Err(); err != nil {
+		_ = stream.Close()
+		return nil, normalizeAnthropicStreamError(err)
+	}
+	return &anthropicChunkStream{stream: stream}, nil
+}
+
+func (b *anthropicBackend) params(request Request) anthropic.MessageNewParams {
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(b.model),
 		MaxTokens: int64(request.MaxTokens),
@@ -49,12 +69,41 @@ func (b *anthropicBackend) generate(ctx context.Context, request Request) (*Resp
 			params.Messages = append(params.Messages, anthropic.NewUserMessage(block))
 		}
 	}
+	return params
+}
 
-	message, err := b.client.Messages.New(ctx, params)
-	if err != nil {
-		return nil, normalizeAnthropicError(err)
+// anthropicChunkStream turns Messages SSE events into chunks while the SDK's
+// Message.Accumulate helper rebuilds the final message for finish.
+type anthropicChunkStream struct {
+	stream  *ssestream.Stream[anthropic.MessageStreamEventUnion]
+	message anthropic.Message
+}
+
+func (s *anthropicChunkStream) recv() (Chunk, error) {
+	for s.stream.Next() {
+		event := s.stream.Current()
+		if err := s.message.Accumulate(event); err != nil {
+			return Chunk{}, normalizeAnthropicStreamError(err)
+		}
+		if event.Type == "content_block_delta" && event.Delta.Type == "text_delta" {
+			return Chunk{Text: event.Delta.Text}, nil
+		}
 	}
+	if err := s.stream.Err(); err != nil {
+		return Chunk{}, normalizeAnthropicStreamError(err)
+	}
+	return Chunk{}, errStreamDone
+}
 
+func (s *anthropicChunkStream) finish() (*Response, error) {
+	return anthropicResponse(&s.message), nil
+}
+
+func (s *anthropicChunkStream) close() error {
+	return s.stream.Close()
+}
+
+func anthropicResponse(message *anthropic.Message) *Response {
 	var text strings.Builder
 	for _, block := range message.Content {
 		if block.Type == "text" {
@@ -72,14 +121,22 @@ func (b *anthropicBackend) generate(ctx context.Context, request Request) (*Resp
 			CachedInputTokens:        int(message.Usage.CacheReadInputTokens),
 			CacheCreationInputTokens: int(message.Usage.CacheCreationInputTokens),
 		},
-	}, nil
+	}
 }
 
 func normalizeAnthropicError(err error) error {
+	return normalizeAnthropicOperationError(err, "generate")
+}
+
+func normalizeAnthropicStreamError(err error) error {
+	return normalizeAnthropicOperationError(err, "generate_stream")
+}
+
+func normalizeAnthropicOperationError(err error, operation string) error {
 	normalized := &Error{
 		Provider:  ProviderClaude,
 		Flavor:    FlavorAPI,
-		Operation: "generate",
+		Operation: operation,
 		Err:       err,
 	}
 	var apiError *anthropic.Error
@@ -109,9 +166,4 @@ func normalizeAnthropicCompletionReason(reason anthropic.StopReason) CompletionR
 	default:
 		return ""
 	}
-}
-
-// TODO(S2): replaced by the Messages streaming adapter.
-func (b *anthropicBackend) generateStream(context.Context, Request) (chunkStream, error) {
-	return nil, errors.New("not implemented")
 }

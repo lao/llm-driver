@@ -2,9 +2,68 @@ package llmwrapper
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
+
+// newSSETestServer serves one text/event-stream response built from raw event
+// blocks, flushing each so adapters observe them incrementally. Blocks are sent
+// verbatim, which lets tests supply malformed frames.
+func newSSETestServer(t *testing.T, status int, events []string) (*httptest.Server, *capturedHTTPRequest) {
+	t.Helper()
+
+	captured := new(capturedHTTPRequest)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Errorf("read request: %v", err)
+		}
+		captured.method = request.Method
+		captured.path = request.URL.Path
+		captured.header = request.Header.Clone()
+		if err := json.Unmarshal(body, &captured.body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+
+		if status != http.StatusOK {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			for _, event := range events {
+				_, _ = io.WriteString(w, event)
+			}
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, event := range events {
+			_, _ = io.WriteString(w, event)
+			w.(http.Flusher).Flush()
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server, captured
+}
+
+// collectStream drains a stream and returns its chunks, terminal error, and
+// final response.
+func collectStream(t *testing.T, stream *Stream) ([]string, error, *Response) {
+	t.Helper()
+
+	var chunks []string
+	for stream.Next() {
+		chunks = append(chunks, stream.Current().Text)
+	}
+	if err := stream.Err(); err != nil {
+		return chunks, err, nil
+	}
+	response, err := stream.Response()
+	return chunks, err, response
+}
 
 // scriptedStream replays a fixed chunk/error script so the Stream contract can
 // be tested without a provider.

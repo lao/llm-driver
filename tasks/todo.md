@@ -9,7 +9,7 @@ refactor green, run its verification before checking the box.
 
 - [x] S1: `stream.go` core — `Stream`/`Chunk` public API, `chunkStream` seam,
       `Client.GenerateStream`, scripted-fake contract tests
-- [ ] S2: Anthropic Messages streaming adapter + SSE fixture tests
+- [x] S2: Anthropic Messages streaming adapter + SSE fixture tests
       — checkpoint: reassess seam before replicating
 - [ ] S3: OpenAI Responses streaming adapter + SSE fixture tests
 - [ ] S4: streaming CLI subprocess runner (pipe stdout, wait, kill on
