@@ -20,6 +20,8 @@ type (
 	Request = core.Request
 	// OutputSchema constrains a response to a JSON document matching a JSON Schema.
 	OutputSchema = core.OutputSchema
+	// Effort selects a reasoning-effort level a target may reject.
+	Effort = core.Effort
 	// Usage reports token counts made available by a target.
 	Usage = core.Usage
 	// CompletionReason describes why a generation ended, when reported.
@@ -54,6 +56,21 @@ const (
 	CompletionReasonMaxTokens = core.CompletionReasonMaxTokens
 	// CompletionReasonRefusal indicates that the model returned a refusal.
 	CompletionReasonRefusal = core.CompletionReasonRefusal
+	// CompletionReasonToolUse indicates that generation ended to call a tool.
+	CompletionReasonToolUse = core.CompletionReasonToolUse
+	// CompletionReasonContentFilter indicates that a content filter stopped generation.
+	CompletionReasonContentFilter = core.CompletionReasonContentFilter
+
+	// EffortLow requests the lowest reasoning effort.
+	EffortLow = core.EffortLow
+	// EffortMedium requests medium reasoning effort.
+	EffortMedium = core.EffortMedium
+	// EffortHigh requests high reasoning effort.
+	EffortHigh = core.EffortHigh
+	// EffortXHigh requests extra-high reasoning effort; openai/api rejects it.
+	EffortXHigh = core.EffortXHigh
+	// EffortMax requests maximum reasoning effort; openai/api rejects it.
+	EffortMax = core.EffortMax
 
 	// FeatureStructuredOutput requests a JSON-schema-constrained response.
 	FeatureStructuredOutput = core.FeatureStructuredOutput

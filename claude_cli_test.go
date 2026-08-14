@@ -52,6 +52,21 @@ func TestClaudeCLICommand(t *testing.T) {
 			},
 			wantPrompt: "User: First\n\nAssistant: Second\n\nUser: Third",
 		},
+		{
+			name: "reasoning effort maps to --effort",
+			config: Config{
+				Provider: ProviderClaude,
+				Flavor:   FlavorCLI,
+				Model:    "claude-test",
+			},
+			request:  Request{MaxTokens: 32, Messages: []Message{User("q")}, Effort: EffortHigh},
+			wantPath: "claude",
+			wantArgs: []string{
+				"-p", "--output-format", "json", "--permission-mode", "default", "--model", "claude-test",
+				"--effort", "high",
+			},
+			wantPrompt: "q",
+		},
 	}
 
 	for _, test := range tests {

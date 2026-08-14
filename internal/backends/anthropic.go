@@ -78,9 +78,11 @@ func (b *anthropicBackend) params(request core.Request) anthropic.MessageNewPara
 	if request.OutputSchema != nil {
 		// Validated in core, so SchemaObject cannot fail here.
 		schema, _ := request.OutputSchema.SchemaObject()
-		params.OutputConfig = anthropic.OutputConfigParam{
-			Format: anthropic.JSONOutputFormatParam{Schema: schema},
-		}
+		params.OutputConfig.Format = anthropic.JSONOutputFormatParam{Schema: schema}
+	}
+	if request.Effort != "" {
+		// Core validated the value against the target's allowed set.
+		params.OutputConfig.Effort = anthropic.OutputConfigEffort(request.Effort)
 	}
 	return params
 }
@@ -200,6 +202,8 @@ func normalizeAnthropicCompletionReason(reason anthropic.StopReason) core.Comple
 		return core.CompletionReasonMaxTokens
 	case anthropic.StopReasonRefusal:
 		return core.CompletionReasonRefusal
+	case anthropic.StopReasonToolUse:
+		return core.CompletionReasonToolUse
 	default:
 		return ""
 	}

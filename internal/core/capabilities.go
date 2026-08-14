@@ -61,14 +61,46 @@ type target struct {
 	flavor   Flavor
 }
 
+// effortFull is every Effort value; claude/api, claude/cli, and codex/cli accept
+// it (verified against anthropic-sdk-go OutputConfigEffort, `claude --effort`
+// help, and Codex's pass-through -c config). effortToHigh caps openai/api at
+// EffortHigh: the neutral superset is Anthropic-style and OpenAI's Responses
+// reasoning.effort tops out at high for these values.
+var (
+	effortFull   = effortSet(EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax)
+	effortToHigh = effortSet(EffortLow, EffortMedium, EffortHigh)
+)
+
+func effortSet(values ...Effort) map[Effort]bool {
+	set := make(map[Effort]bool, len(values))
+	for _, value := range values {
+		set[value] = true
+	}
+	return set
+}
+
 // featureSupport maps each target to the optional features it honors. A feature
-// absent from a target's set is rejected with ErrUnsupportedFeature. Later
-// phases add the cells they implement.
-var featureSupport = map[target]map[Feature]bool{
-	{ProviderClaude, FlavorAPI}: {FeatureStructuredOutput: true},
-	{ProviderClaude, FlavorCLI}: {FeatureStructuredOutput: true},
-	{ProviderOpenAI, FlavorAPI}: {FeatureStructuredOutput: true},
-	{ProviderOpenAI, FlavorCLI}: {FeatureStructuredOutput: true},
+// absent from a target's map is rejected with ErrUnsupportedFeature. The value is
+// the neutral values a valued feature accepts (never remapped, so a value outside
+// the set is rejected); an empty map marks a plain boolean feature with no value
+// constraint. Later phases add the cells they implement.
+var featureSupport = map[target]map[Feature]map[Effort]bool{
+	{ProviderClaude, FlavorAPI}: {
+		FeatureStructuredOutput: {},
+		FeatureReasoningEffort:  effortFull,
+	},
+	{ProviderClaude, FlavorCLI}: {
+		FeatureStructuredOutput: {},
+		FeatureReasoningEffort:  effortFull,
+	},
+	{ProviderOpenAI, FlavorAPI}: {
+		FeatureStructuredOutput: {},
+		FeatureReasoningEffort:  effortToHigh,
+	},
+	{ProviderOpenAI, FlavorCLI}: {
+		FeatureStructuredOutput: {},
+		FeatureReasoningEffort:  effortFull,
+	},
 }
 
 // AllFeatures returns every Feature in parity-inventory order. It lets callers
@@ -80,7 +112,8 @@ func AllFeatures() []Feature {
 
 // Supports reports whether the target honors the feature.
 func Supports(provider Provider, flavor Flavor, feature Feature) bool {
-	return featureSupport[target{provider, flavor}][feature]
+	_, ok := featureSupport[target{provider, flavor}][feature]
+	return ok
 }
 
 // featuresOf returns the optional features the request exercises, in inventory
@@ -91,6 +124,9 @@ func featuresOf(r Request) []Feature {
 	if r.OutputSchema != nil {
 		features = append(features, FeatureStructuredOutput)
 	}
+	if r.Effort != "" {
+		features = append(features, FeatureReasoningEffort)
+	}
 	return features
 }
 
@@ -99,7 +135,19 @@ func featuresOf(r Request) []Feature {
 // an unsupported feature returns ErrUnsupportedFeature naming the feature and
 // the target. With today's Request fields it always passes.
 func ValidateRequestFor(provider Provider, flavor Flavor, r Request) error {
-	return validateFeaturesFor(provider, flavor, featuresOf(r))
+	if err := validateFeaturesFor(provider, flavor, featuresOf(r)); err != nil {
+		return err
+	}
+	// Valued features: the neutral Effort value must be in the target's allowed
+	// set (openai/api tops out at EffortHigh). The feature-support check above
+	// already ran, so a supported target has a non-nil allowed set here.
+	if r.Effort != "" {
+		allowed := featureSupport[target{provider, flavor}][FeatureReasoningEffort]
+		if !allowed[r.Effort] {
+			return fmt.Errorf("%w: reasoning effort %q not supported by %s", ErrUnsupportedFeature, r.Effort, formatTarget(provider, flavor))
+		}
+	}
+	return nil
 }
 
 // validateFeaturesFor is the capability gate: it rejects the first feature the

@@ -24,6 +24,25 @@ type Message struct {
 	Text string `json:"text"`
 }
 
+// Effort selects a reasoning-effort level. The zero value "" leaves effort
+// unset, preserving today's behavior. The enum is the Anthropic-style superset;
+// values are provider-validated, never remapped: each target rejects values it
+// does not support (openai/api tops out at EffortHigh).
+type Effort string
+
+const (
+	// EffortLow requests the lowest reasoning effort.
+	EffortLow Effort = "low"
+	// EffortMedium requests medium reasoning effort.
+	EffortMedium Effort = "medium"
+	// EffortHigh requests high reasoning effort.
+	EffortHigh Effort = "high"
+	// EffortXHigh requests extra-high reasoning effort; openai/api rejects it.
+	EffortXHigh Effort = "xhigh"
+	// EffortMax requests maximum reasoning effort; openai/api rejects it.
+	EffortMax Effort = "max"
+)
+
 // OutputSchema constrains a response to a JSON document matching a JSON Schema.
 type OutputSchema struct {
 	// Name labels the schema. It is required by the openai mapping and defaulted
@@ -56,6 +75,10 @@ type Request struct {
 	// OutputSchema optionally constrains the response to a JSON document matching
 	// a JSON Schema; the result is exposed on Response.StructuredOutput.
 	OutputSchema *OutputSchema `json:"output_schema,omitempty"`
+	// Effort optionally selects a reasoning-effort level. The zero value ""
+	// leaves it unset. A value the target does not support is rejected with
+	// ErrUnsupportedFeature before invocation.
+	Effort Effort `json:"effort,omitempty"`
 }
 
 // Usage reports token counts made available by a target.
@@ -82,6 +105,10 @@ const (
 	CompletionReasonMaxTokens CompletionReason = "max_tokens"
 	// CompletionReasonRefusal indicates that the model returned a refusal.
 	CompletionReasonRefusal CompletionReason = "refusal"
+	// CompletionReasonToolUse indicates that generation ended to call a tool.
+	CompletionReasonToolUse CompletionReason = "tool_use"
+	// CompletionReasonContentFilter indicates that a content filter stopped generation.
+	CompletionReasonContentFilter CompletionReason = "content_filter"
 )
 
 // Response is a provider-neutral text generation result.

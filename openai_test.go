@@ -222,6 +222,76 @@ func TestOpenAIGeneratePreservesMaxOutputTokensResult(t *testing.T) {
 	}
 }
 
+func TestOpenAIGenerateMapsEffort(t *testing.T) {
+	t.Parallel()
+
+	const response = `{
+  "id":"resp_e","object":"response","status":"completed","model":"gpt-test",
+  "output":[{"id":"m","type":"message","status":"completed","role":"assistant",
+    "content":[{"type":"output_text","text":"ok","annotations":[],"logprobs":[]}]}],
+  "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{
+		Provider: ProviderOpenAI,
+		Flavor:   FlavorAPI,
+		Model:    "gpt-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	if _, err := client.Generate(context.Background(), Request{
+		MaxTokens: 64,
+		Messages:  []Message{User("q")},
+		Effort:    EffortHigh,
+	}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	// Effort maps to reasoning.effort with the neutral value passed through.
+	reasoning, ok := captured.body["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != "high" {
+		t.Fatalf("reasoning = %#v", captured.body["reasoning"])
+	}
+}
+
+func TestOpenAIGeneratePreservesContentFilterResult(t *testing.T) {
+	t.Parallel()
+
+	const response = `{
+  "id":"resp_cf","object":"response","status":"incomplete","model":"gpt-test",
+  "output":[{"id":"m","type":"message","status":"incomplete","role":"assistant",
+    "content":[{"type":"output_text","text":"partial","annotations":[],"logprobs":[]}]}],
+  "incomplete_details":{"reason":"content_filter"},
+  "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+}`
+	server, _ := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{
+		Provider: ProviderOpenAI,
+		Flavor:   FlavorAPI,
+		Model:    "gpt-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	result, err := client.Generate(context.Background(), Request{MaxTokens: 16, Messages: []Message{User("hello")}})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if result.Text != "partial" {
+		t.Fatalf("response text = %q, want %q", result.Text, "partial")
+	}
+	if result.CompletionReason != CompletionReasonContentFilter {
+		t.Fatalf("completion reason = %q, want %q", result.CompletionReason, CompletionReasonContentFilter)
+	}
+}
+
 func TestOpenAIGeneratePreservesRefusal(t *testing.T) {
 	t.Parallel()
 

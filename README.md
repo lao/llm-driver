@@ -168,7 +168,7 @@ and target.
 | --- | --- | --- | --- | --- |
 | System, messages, MaxTokens, streaming | ✓ | ✓ | ✓ | ✓ |
 | Structured output (JSON schema) | ✓ | ✓ | ✓ | ✓ |
-| Reasoning effort | ✗ | ✗ | ✗ | ✗ |
+| Reasoning effort | ✓ | ✓ | ✓ | ✓ |
 | Reasoning/thinking visibility | ✗ | ✗ | ✗ | ✗ |
 | Tool calling (caller-executed) | ✗ | ✗ | ✗ | ✗ |
 | Image input | ✗ | ✗ | ✗ | ✗ |
@@ -181,9 +181,10 @@ and target.
 | Conversation continuation by ID | ✗ | ✗ | ✗ | ✗ |
 | Token counting | ✗ | ✗ | ✗ | ✗ |
 
-Structured output is supported on every target; the remaining optional features
-are not yet implemented, and later releases flip cells as each target gains
-support. `codex/cli` is the `openai` provider with the `cli` flavor.
+Structured output and reasoning effort are supported on every target; the
+remaining optional features are not yet implemented, and later releases flip
+cells as each target gains support. `codex/cli` is the `openai` provider with the
+`cli` flavor.
 
 ## Structured output
 
@@ -230,6 +231,38 @@ go run ./examples/switchable \
   --provider claude --flavor api --model claude-sonnet-4-5 \
   --prompt "Extract the year from: shipped in 1998." \
   --schema ./schema.json
+```
+
+## Reasoning effort
+
+Set `Request.Effort` to ask the model for more or less reasoning. The neutral
+enum is the Anthropic-style superset — `EffortLow`, `EffortMedium`,
+`EffortHigh`, `EffortXHigh`, `EffortMax` — and the zero value leaves effort
+unset (today's behavior).
+
+```go
+response, err := client.Generate(ctx, llmdriver.Request{
+	Messages:  []llmdriver.Message{llmdriver.User("Prove there are infinitely many primes.")},
+	MaxTokens: 1024,
+	Effort:    llmdriver.EffortHigh,
+})
+```
+
+Values are provider-validated, never remapped: each target rejects a value it
+does not accept with `ErrUnsupportedFeature` naming the value and target.
+`openai/api` tops out at `EffortHigh`, so `EffortXHigh` and `EffortMax` are
+rejected there; the other three accept the full set. Each target maps the level
+natively: `claude/api` via `output_config.effort`, `openai/api` via
+`reasoning.effort`, `claude/cli` via `--effort`, and `codex/cli` via
+`-c model_reasoning_effort`.
+
+The example accepts a level via `--effort`:
+
+```bash
+go run ./examples/switchable \
+  --provider claude --flavor api --model claude-sonnet-4-5 \
+  --prompt "Prove there are infinitely many primes." \
+  --effort high
 ```
 
 ## Scope and CLI differences
