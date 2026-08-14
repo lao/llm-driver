@@ -29,6 +29,8 @@ type (
 	Error = core.Error
 	// Chunk is one incremental piece of streaming response text.
 	Chunk = core.Chunk
+	// Feature identifies an optional generation capability a target may reject.
+	Feature = core.Feature
 )
 
 const (
@@ -50,6 +52,33 @@ const (
 	CompletionReasonMaxTokens = core.CompletionReasonMaxTokens
 	// CompletionReasonRefusal indicates that the model returned a refusal.
 	CompletionReasonRefusal = core.CompletionReasonRefusal
+
+	// FeatureStructuredOutput requests a JSON-schema-constrained response.
+	FeatureStructuredOutput = core.FeatureStructuredOutput
+	// FeatureReasoningEffort requests a reasoning-effort level.
+	FeatureReasoningEffort = core.FeatureReasoningEffort
+	// FeatureReasoningVisibility requests visible reasoning or thinking output.
+	FeatureReasoningVisibility = core.FeatureReasoningVisibility
+	// FeatureTools requests caller-executed tool calling.
+	FeatureTools = core.FeatureTools
+	// FeatureImageInput requests image content in the input.
+	FeatureImageInput = core.FeatureImageInput
+	// FeatureDocumentInput requests PDF or document content in the input.
+	FeatureDocumentInput = core.FeatureDocumentInput
+	// FeatureSamplingParams requests temperature or top-p sampling controls.
+	FeatureSamplingParams = core.FeatureSamplingParams
+	// FeatureTopK requests top-k sampling, which openai/api lacks.
+	FeatureTopK = core.FeatureTopK
+	// FeatureStopSequences requests stop sequences, which openai/api lacks.
+	FeatureStopSequences = core.FeatureStopSequences
+	// FeatureWebSearch requests provider-executed web search.
+	FeatureWebSearch = core.FeatureWebSearch
+	// FeatureUserID requests an abuse-tracking end-user identifier.
+	FeatureUserID = core.FeatureUserID
+	// FeatureContinuation requests conversation continuation by identifier.
+	FeatureContinuation = core.FeatureContinuation
+	// FeatureTokenCounting requests standalone token counting.
+	FeatureTokenCounting = core.FeatureTokenCounting
 )
 
 var (
@@ -59,7 +88,15 @@ var (
 	ErrInvalidRequest = core.ErrInvalidRequest
 	// ErrExecutableNotFound identifies a missing provider CLI executable.
 	ErrExecutableNotFound = core.ErrExecutableNotFound
+	// ErrUnsupportedFeature identifies a request feature the selected target
+	// cannot honor.
+	ErrUnsupportedFeature = core.ErrUnsupportedFeature
 )
+
+// AllFeatures returns every Feature in parity-inventory order.
+func AllFeatures() []Feature {
+	return core.AllFeatures()
+}
 
 // User builds a user-role text message.
 func User(text string) Message {

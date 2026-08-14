@@ -42,4 +42,11 @@
 // hosted-API control, including an exact maximum output-token limit. Chunk
 // granularity is target-defined: the CLI flavors may deliver fewer, larger
 // chunks than the hosted APIs.
+//
+// Optional generation features beyond the baseline (system, messages,
+// MaxTokens, streaming) are gated per target. Client.Supports reports whether
+// the configured target honors a Feature, and Generate and GenerateStream
+// reject a request exercising an unsupported feature with ErrUnsupportedFeature,
+// naming the feature and target rather than silently degrading. The README
+// capability matrix lists each feature's support across the four targets.
 package llmdriver

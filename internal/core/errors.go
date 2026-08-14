@@ -13,6 +13,9 @@ var (
 	ErrInvalidRequest = errors.New("llmdriver: invalid request")
 	// ErrExecutableNotFound identifies a missing provider CLI executable.
 	ErrExecutableNotFound = errors.New("llmdriver: executable not found")
+	// ErrUnsupportedFeature identifies a request feature the selected target
+	// cannot honor. The wrapping message names the feature and the target.
+	ErrUnsupportedFeature = errors.New("llmdriver: unsupported feature")
 )
 
 // Error adds target and operation context to configuration and runtime failures.
