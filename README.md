@@ -173,16 +173,18 @@ and target.
 | Tool calling (caller-executed) | ✗ | ✗ | ✗ | ✗ |
 | Image input | ✗ | ✗ | ✗ | ✗ |
 | PDF/document input | ✗ | ✗ | ✗ | ✗ |
-| Temperature / TopP | ✗ | ✗ | ✗ | ✗ |
-| TopK | ✗ | ✗ | ✗ | ✗ |
-| Stop sequences | ✗ | ✗ | ✗ | ✗ |
+| Temperature / TopP | ✓ | ✓ | ✗ | ✗ |
+| TopK | ✓ | ✗ | ✗ | ✗ |
+| Stop sequences | ✓ | ✗ | ✗ | ✗ |
 | Web search | ✗ | ✗ | ✗ | ✗ |
-| Metadata / end-user ID | ✗ | ✗ | ✗ | ✗ |
+| Metadata / end-user ID | ✓ | ✓ | ✗ | ✗ |
 | Conversation continuation by ID | ✗ | ✗ | ✗ | ✗ |
 | Token counting | ✗ | ✗ | ✗ | ✗ |
 
-Structured output and reasoning effort are supported on every target; the
-remaining optional features are not yet implemented, and later releases flip
+Structured output and reasoning effort are supported on every target. Sampling
+params (temperature/top-p) and the end-user ID map on both API flavors, with
+top-k and stop sequences on `claude/api` only (the Responses API lacks both).
+The remaining optional features are not yet implemented, and later releases flip
 cells as each target gains support. `codex/cli` is the `openai` provider with the
 `cli` flavor.
 

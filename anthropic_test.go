@@ -152,6 +152,12 @@ func TestAnthropicGenerateMapsRequestAndResponse(t *testing.T) {
 	if _, ok := captured.body["output_config"]; ok {
 		t.Fatalf("output_config present without OutputSchema: %#v", captured.body["output_config"])
 	}
+	// Backward compat: no sampling fields => none appear in the request body.
+	for _, key := range []string{"temperature", "top_p", "top_k", "stop_sequences", "metadata"} {
+		if _, ok := captured.body[key]; ok {
+			t.Fatalf("%s present without sampling params: %#v", key, captured.body[key])
+		}
+	}
 
 	if result.ID != "msg_123" || result.Model != "claude-test" || result.Text != "Hello, world" {
 		t.Fatalf("response = %+v", result)
@@ -253,6 +259,120 @@ func TestAnthropicGenerateMapsEffort(t *testing.T) {
 	// tool_use stop reason maps to the new completion reason.
 	if result.CompletionReason != CompletionReasonToolUse {
 		t.Fatalf("completion reason = %q, want %q", result.CompletionReason, CompletionReasonToolUse)
+	}
+}
+
+func TestAnthropicGenerateMapsSamplingParams(t *testing.T) {
+	t.Parallel()
+
+	response := `{"id":"msg_p","type":"message","role":"assistant","model":"claude-test",` +
+		`"content":[{"type":"text","text":"ok"}],"stop_reason":"stop_sequence","usage":{"input_tokens":1,"output_tokens":1}}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{
+		Provider: ProviderClaude,
+		Flavor:   FlavorAPI,
+		Model:    "claude-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	temp, topP, topK := 0.5, 0.9, 40
+	result, err := client.Generate(context.Background(), Request{
+		MaxTokens:     64,
+		Messages:      []Message{User("q")},
+		Temperature:   &temp,
+		TopP:          &topP,
+		TopK:          &topK,
+		StopSequences: []string{"STOP"},
+		UserID:        "user-1",
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	if captured.body["temperature"] != 0.5 || captured.body["top_p"] != 0.9 || captured.body["top_k"] != float64(40) {
+		t.Fatalf("sampling params = %+v", captured.body)
+	}
+	stops, ok := captured.body["stop_sequences"].([]any)
+	if !ok || len(stops) != 1 || stops[0] != "STOP" {
+		t.Fatalf("stop_sequences = %#v", captured.body["stop_sequences"])
+	}
+	metadata, ok := captured.body["metadata"].(map[string]any)
+	if !ok || metadata["user_id"] != "user-1" {
+		t.Fatalf("metadata = %#v", captured.body["metadata"])
+	}
+	// A stop-sequence ending maps to the normal stop reason.
+	if result.CompletionReason != CompletionReasonStop {
+		t.Fatalf("completion reason = %q, want %q", result.CompletionReason, CompletionReasonStop)
+	}
+}
+
+func TestAnthropicGenerateSurfacesSamplingRejection(t *testing.T) {
+	t.Parallel()
+
+	// Newest models reject temperature; the provider 400 surfaces as the
+	// normalized API error, not a client-side validation failure.
+	server, _ := newAPITestServer(t, http.StatusBadRequest,
+		`{"type":"error","error":{"type":"invalid_request_error","message":"temperature is not supported"}}`)
+	client, err := New(Config{
+		Provider: ProviderClaude,
+		Flavor:   FlavorAPI,
+		Model:    "claude-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	temp := 0.5
+	_, err = client.Generate(context.Background(), Request{
+		MaxTokens:   16,
+		Messages:    []Message{User("hello")},
+		Temperature: &temp,
+	})
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("Generate() error = %T %v, want *Error", err, err)
+	}
+	if target.Status != http.StatusBadRequest || target.Code != "invalid_request_error" {
+		t.Fatalf("error status/code = %d/%q", target.Status, target.Code)
+	}
+	if target.Operation != "generate" {
+		t.Fatalf("error operation = %q, want %q", target.Operation, "generate")
+	}
+}
+
+func TestAnthropicStreamMapsSamplingParams(t *testing.T) {
+	t.Parallel()
+
+	client, captured := newAnthropicStreamClient(t, http.StatusOK, anthropicSSEEvents())
+	temp, topP, topK := 0.5, 0.9, 40
+	stream, err := client.GenerateStream(context.Background(), Request{
+		MaxTokens:     64,
+		Messages:      []Message{User("hello")},
+		Temperature:   &temp,
+		TopP:          &topP,
+		TopK:          &topK,
+		StopSequences: []string{"STOP"},
+		UserID:        "user-1",
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+	if _, err, _ := collectStream(t, stream); err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+
+	if captured.body["temperature"] != 0.5 || captured.body["top_p"] != 0.9 || captured.body["top_k"] != float64(40) {
+		t.Fatalf("sampling params = %+v", captured.body)
+	}
+	if metadata, ok := captured.body["metadata"].(map[string]any); !ok || metadata["user_id"] != "user-1" {
+		t.Fatalf("metadata = %#v", captured.body["metadata"])
 	}
 }
 

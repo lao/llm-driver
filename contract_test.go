@@ -177,6 +177,87 @@ func TestContractEffortAcrossFourTargets(t *testing.T) {
 	}
 }
 
+// TestContractSamplingParamsAcrossFourTargets asserts the Phase 4 support map:
+// Temperature/TopP/UserID map on both API flavors and are rejected with
+// ErrUnsupportedFeature (before any transport call) on both CLI flavors; TopK
+// and StopSequences are supported only on claude/api and rejected everywhere
+// else, including openai/api (the Responses API lacks both).
+func TestContractSamplingParamsAcrossFourTargets(t *testing.T) {
+	t.Parallel()
+
+	temp, topP, topK := 0.5, 0.9, 40
+	for _, target := range contractTargets() {
+		t.Run(string(target.provider)+"/"+string(target.flavor), func(t *testing.T) {
+			t.Parallel()
+
+			config, runner, calls := newContractTarget(t, target.provider, target.flavor)
+			client, err := newClient(config, runner)
+			if err != nil {
+				t.Fatalf("New(): %v", err)
+			}
+			apiFlavor := target.flavor == FlavorAPI
+			claudeAPI := target.provider == ProviderClaude && apiFlavor
+
+			// Temperature/TopP/UserID: mapped on API flavors, rejected on CLI.
+			_, err = client.Generate(context.Background(), Request{
+				MaxTokens:   64,
+				Messages:    []Message{User("q")},
+				Temperature: &temp,
+				TopP:        &topP,
+				UserID:      "u1",
+			})
+			if apiFlavor {
+				if err != nil {
+					t.Fatalf("Generate() sampling: %v", err)
+				}
+				if calls() != 1 {
+					t.Fatalf("transport calls = %d, want 1", calls())
+				}
+				if !client.Supports(FeatureSamplingParams) || !client.Supports(FeatureUserID) {
+					t.Fatal("Supports(sampling/user id) = false on API flavor")
+				}
+			} else {
+				if !errors.Is(err, ErrUnsupportedFeature) {
+					t.Fatalf("Generate() sampling error = %v, want ErrUnsupportedFeature", err)
+				}
+				if calls() != 0 {
+					t.Fatalf("transport called for rejected sampling: calls = %d", calls())
+				}
+				if client.Supports(FeatureSamplingParams) || client.Supports(FeatureUserID) {
+					t.Fatal("Supports(sampling/user id) = true on CLI flavor")
+				}
+			}
+
+			// TopK and StopSequences: claude/api only.
+			for _, request := range []Request{
+				{MaxTokens: 64, Messages: []Message{User("q")}, TopK: &topK},
+				{MaxTokens: 64, Messages: []Message{User("q")}, StopSequences: []string{"STOP"}},
+			} {
+				before := calls()
+				_, err := client.Generate(context.Background(), request)
+				if claudeAPI {
+					if err != nil {
+						t.Fatalf("Generate() topk/stop: %v", err)
+					}
+					if calls() != before+1 {
+						t.Fatalf("transport calls = %d, want %d", calls(), before+1)
+					}
+				} else {
+					if !errors.Is(err, ErrUnsupportedFeature) {
+						t.Fatalf("Generate() topk/stop error = %v, want ErrUnsupportedFeature", err)
+					}
+					if calls() != before {
+						t.Fatalf("transport called for rejected topk/stop: calls = %d", calls())
+					}
+				}
+			}
+			if got := claudeAPI; client.Supports(FeatureTopK) != got || client.Supports(FeatureStopSequences) != got {
+				t.Fatalf("Supports(topk/stop) mismatch on %s/%s", target.provider, target.flavor)
+			}
+		})
+	}
+}
+
 func newContractStructuredTarget(t *testing.T, provider Provider, flavor Flavor) (Config, core.CommandRunner) {
 	t.Helper()
 

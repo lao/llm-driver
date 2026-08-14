@@ -84,6 +84,24 @@ func (b *anthropicBackend) params(request core.Request) anthropic.MessageNewPara
 		// Core validated the value against the target's allowed set.
 		params.OutputConfig.Effort = anthropic.OutputConfigEffort(request.Effort)
 	}
+	// Sampling params are passed through; the provider enforces its own bounds
+	// and surfaces rejections (e.g. newest models reject temperature) as the
+	// normalized API error.
+	if request.Temperature != nil {
+		params.Temperature = anthropic.Float(*request.Temperature)
+	}
+	if request.TopP != nil {
+		params.TopP = anthropic.Float(*request.TopP)
+	}
+	if request.TopK != nil {
+		params.TopK = anthropic.Int(int64(*request.TopK))
+	}
+	if len(request.StopSequences) > 0 {
+		params.StopSequences = request.StopSequences
+	}
+	if request.UserID != "" {
+		params.Metadata = anthropic.MetadataParam{UserID: anthropic.String(request.UserID)}
+	}
 	return params
 }
 

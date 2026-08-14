@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -79,6 +80,23 @@ type Request struct {
 	// leaves it unset. A value the target does not support is rejected with
 	// ErrUnsupportedFeature before invocation.
 	Effort Effort `json:"effort,omitempty"`
+	// Temperature optionally sets the sampling temperature. Nil leaves it unset.
+	// It is passed through to API flavors (validated only as non-negative and
+	// finite); the provider enforces its own upper bound and may reject it.
+	Temperature *float64 `json:"temperature,omitempty"`
+	// TopP optionally sets nucleus-sampling probability mass. Nil leaves it
+	// unset. Passed through like Temperature (non-negative, finite).
+	TopP *float64 `json:"top_p,omitempty"`
+	// TopK optionally sets top-k sampling. Nil leaves it unset. Only anthropic/api
+	// supports it; other targets reject it with ErrUnsupportedFeature. Non-negative.
+	TopK *int `json:"top_k,omitempty"`
+	// StopSequences optionally sets sequences that stop generation. Empty leaves
+	// it unset. Only anthropic/api supports it; other targets reject it.
+	StopSequences []string `json:"stop_sequences,omitempty"`
+	// UserID optionally sets an abuse-tracking end-user identifier. Empty leaves
+	// it unset. API flavors map it (anthropic metadata.user_id, openai
+	// safety_identifier); CLI flavors reject it with ErrUnsupportedFeature.
+	UserID string `json:"user_id,omitempty"`
 }
 
 // Usage reports token counts made available by a target.
@@ -167,6 +185,29 @@ func (r Request) validate() error {
 		if _, err := r.OutputSchema.SchemaObject(); err != nil {
 			return err
 		}
+	}
+	// Sampling params are passed through per SPEC note ¹: reject only clearly
+	// invalid values and let the provider enforce its own upper bounds.
+	if err := validateSamplingParam(r.Temperature, "Temperature"); err != nil {
+		return err
+	}
+	if err := validateSamplingParam(r.TopP, "TopP"); err != nil {
+		return err
+	}
+	if r.TopK != nil && *r.TopK < 0 {
+		return fmt.Errorf("%w: TopK must be non-negative", ErrInvalidRequest)
+	}
+	return nil
+}
+
+// validateSamplingParam rejects a non-nil sampling value that is negative or
+// non-finite (NaN/Inf); provider-specific upper bounds are not enforced.
+func validateSamplingParam(value *float64, name string) error {
+	if value == nil {
+		return nil
+	}
+	if math.IsNaN(*value) || math.IsInf(*value, 0) || *value < 0 {
+		return fmt.Errorf("%w: %s must be a non-negative finite number", ErrInvalidRequest, name)
 	}
 	return nil
 }

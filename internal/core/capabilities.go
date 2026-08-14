@@ -88,6 +88,10 @@ var featureSupport = map[target]map[Feature]map[Effort]bool{
 	{ProviderClaude, FlavorAPI}: {
 		FeatureStructuredOutput: {},
 		FeatureReasoningEffort:  effortFull,
+		FeatureSamplingParams:   {},
+		FeatureTopK:             {},
+		FeatureStopSequences:    {},
+		FeatureUserID:           {},
 	},
 	{ProviderClaude, FlavorCLI}: {
 		FeatureStructuredOutput: {},
@@ -96,6 +100,8 @@ var featureSupport = map[target]map[Feature]map[Effort]bool{
 	{ProviderOpenAI, FlavorAPI}: {
 		FeatureStructuredOutput: {},
 		FeatureReasoningEffort:  effortToHigh,
+		FeatureSamplingParams:   {},
+		FeatureUserID:           {},
 	},
 	{ProviderOpenAI, FlavorCLI}: {
 		FeatureStructuredOutput: {},
@@ -126,6 +132,18 @@ func featuresOf(r Request) []Feature {
 	}
 	if r.Effort != "" {
 		features = append(features, FeatureReasoningEffort)
+	}
+	if r.Temperature != nil || r.TopP != nil {
+		features = append(features, FeatureSamplingParams)
+	}
+	if r.TopK != nil {
+		features = append(features, FeatureTopK)
+	}
+	if len(r.StopSequences) > 0 {
+		features = append(features, FeatureStopSequences)
+	}
+	if r.UserID != "" {
+		features = append(features, FeatureUserID)
 	}
 	return features
 }

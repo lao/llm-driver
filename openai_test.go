@@ -133,6 +133,12 @@ func TestOpenAIGenerateMapsRequestAndResponse(t *testing.T) {
 	if _, ok := captured.body["text"]; ok {
 		t.Fatalf("text present without OutputSchema: %#v", captured.body["text"])
 	}
+	// Backward compat: no sampling fields => none appear in the request body.
+	for _, key := range []string{"temperature", "top_p", "safety_identifier"} {
+		if _, ok := captured.body[key]; ok {
+			t.Fatalf("%s present without sampling params: %#v", key, captured.body[key])
+		}
+	}
 
 	input, ok := captured.body["input"].([]any)
 	if !ok || len(input) != 3 {
@@ -255,6 +261,72 @@ func TestOpenAIGenerateMapsEffort(t *testing.T) {
 	reasoning, ok := captured.body["reasoning"].(map[string]any)
 	if !ok || reasoning["effort"] != "high" {
 		t.Fatalf("reasoning = %#v", captured.body["reasoning"])
+	}
+}
+
+func TestOpenAIGenerateMapsSamplingParams(t *testing.T) {
+	t.Parallel()
+
+	const response = `{
+  "id":"resp_p","object":"response","status":"completed","model":"gpt-test",
+  "output":[{"id":"m","type":"message","status":"completed","role":"assistant",
+    "content":[{"type":"output_text","text":"ok","annotations":[],"logprobs":[]}]}],
+  "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{
+		Provider: ProviderOpenAI,
+		Flavor:   FlavorAPI,
+		Model:    "gpt-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	temp, topP := 0.5, 0.9
+	if _, err := client.Generate(context.Background(), Request{
+		MaxTokens:   64,
+		Messages:    []Message{User("q")},
+		Temperature: &temp,
+		TopP:        &topP,
+		UserID:      "user-1",
+	}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	// Temperature/TopP pass through; UserID maps to safety_identifier.
+	if captured.body["temperature"] != 0.5 || captured.body["top_p"] != 0.9 {
+		t.Fatalf("sampling params = %+v", captured.body)
+	}
+	if captured.body["safety_identifier"] != "user-1" {
+		t.Fatalf("safety_identifier = %#v", captured.body["safety_identifier"])
+	}
+}
+
+func TestOpenAIStreamMapsSamplingParams(t *testing.T) {
+	t.Parallel()
+
+	client, captured := newOpenAIStreamClient(t, http.StatusOK, openAISSEEvents())
+	temp, topP := 0.5, 0.9
+	stream, err := client.GenerateStream(context.Background(), Request{
+		MaxTokens:   64,
+		Messages:    []Message{User("hello")},
+		Temperature: &temp,
+		TopP:        &topP,
+		UserID:      "user-1",
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+	if _, err, _ := collectStream(t, stream); err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+
+	if captured.body["temperature"] != 0.5 || captured.body["top_p"] != 0.9 || captured.body["safety_identifier"] != "user-1" {
+		t.Fatalf("sampling params = %+v", captured.body)
 	}
 }
 

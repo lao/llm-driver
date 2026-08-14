@@ -93,6 +93,17 @@ func (b *openAIBackend) params(request core.Request) responses.ResponseNewParams
 		// Core validated the value against the target's allowed set (low..high).
 		params.Reasoning = openai.ReasoningParam{Effort: openai.ReasoningEffort(request.Effort)}
 	}
+	// Sampling params are passed through; TopK and StopSequences are rejected in
+	// core (the Responses API lacks both), so only Temperature/TopP/UserID map.
+	if request.Temperature != nil {
+		params.Temperature = openai.Float(*request.Temperature)
+	}
+	if request.TopP != nil {
+		params.TopP = openai.Float(*request.TopP)
+	}
+	if request.UserID != "" {
+		params.SafetyIdentifier = openai.String(request.UserID)
+	}
 	if request.OutputSchema != nil {
 		// Validated in core, so SchemaObject cannot fail here.
 		schema, _ := request.OutputSchema.SchemaObject()

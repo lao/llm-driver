@@ -46,11 +46,26 @@ func TestSupportsMatchesImplementedFeatures(t *testing.T) {
 
 	for _, tg := range allTargets() {
 		for _, feature := range allFeatures {
-			want := feature == FeatureStructuredOutput || feature == FeatureReasoningEffort
-			if got := Supports(tg.provider, tg.flavor, feature); got != want {
-				t.Errorf("Supports(%s/%s, %q) = %v, want %v", tg.provider, tg.flavor, feature, got, want)
+			if got := Supports(tg.provider, tg.flavor, feature); got != wantImplemented(tg, feature) {
+				t.Errorf("Supports(%s/%s, %q) = %v, want %v", tg.provider, tg.flavor, feature, got, !got)
 			}
 		}
+	}
+}
+
+// wantImplemented is the expected Supports() result per target after Phase 4:
+// structured output and reasoning effort on every target; sampling params and
+// end-user id on both API flavors; top-k and stop sequences on claude/api only.
+func wantImplemented(tg target, feature Feature) bool {
+	switch feature {
+	case FeatureStructuredOutput, FeatureReasoningEffort:
+		return true
+	case FeatureSamplingParams, FeatureUserID:
+		return tg.flavor == FlavorAPI
+	case FeatureTopK, FeatureStopSequences:
+		return tg.provider == ProviderClaude && tg.flavor == FlavorAPI
+	default:
+		return false
 	}
 }
 

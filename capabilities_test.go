@@ -143,12 +143,25 @@ func TestSupportsMatchesImplementedFeatures(t *testing.T) {
 	for _, mt := range matrixColumns {
 		client := clientFor(t, mt)
 		for _, row := range matrixRows {
-			// Structured output and reasoning effort are implemented on every
-			// target; nothing else is yet.
-			want := row.feature == FeatureStructuredOutput || row.feature == FeatureReasoningEffort
-			if got := client.Supports(row.feature); got != want {
-				t.Errorf("%s/%s Supports(%q) = %v, want %v", mt.provider, mt.flavor, row.feature, got, want)
+			if got := client.Supports(row.feature); got != wantSupport(mt, row.feature) {
+				t.Errorf("%s/%s Supports(%q) = %v, want %v", mt.provider, mt.flavor, row.feature, got, !got)
 			}
 		}
+	}
+}
+
+// wantSupport is the expected Supports() result per target after Phase 4:
+// structured output and reasoning effort on every target; sampling params and
+// end-user ID on both API flavors; top-k and stop sequences on claude/api only.
+func wantSupport(mt matrixTarget, feature Feature) bool {
+	switch feature {
+	case FeatureStructuredOutput, FeatureReasoningEffort:
+		return true
+	case FeatureSamplingParams, FeatureUserID:
+		return mt.flavor == FlavorAPI
+	case FeatureTopK, FeatureStopSequences:
+		return mt.provider == ProviderClaude && mt.flavor == FlavorAPI
+	default:
+		return false
 	}
 }
