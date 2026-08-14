@@ -31,6 +31,66 @@ func openAISSEEvents() []string {
 	}
 }
 
+func TestOpenAIStreamToolCalls(t *testing.T) {
+	t.Parallel()
+
+	// A function call streams its arguments as function_call_arguments.delta
+	// fragments; the completed response carries the parsed call.
+	completed := `{"id":"resp_stream","object":"response","status":"completed","model":"gpt-test",` +
+		`"output":[{"id":"fc_a","type":"function_call","status":"completed","call_id":"call_a","name":"get_weather","arguments":"{\"city\":\"SF\"}"}],` +
+		`"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}`
+	events := []string{
+		openAISSEEvents()[0],
+		"event: response.function_call_arguments.delta\n" +
+			`data: {"type":"response.function_call_arguments.delta","sequence_number":1,"item_id":"fc_a","output_index":0,"delta":"{\"city\":"}` + "\n\n",
+		"event: response.function_call_arguments.delta\n" +
+			`data: {"type":"response.function_call_arguments.delta","sequence_number":2,"item_id":"fc_a","output_index":0,"delta":"\"SF\"}"}` + "\n\n",
+		"event: response.completed\n" +
+			`data: {"type":"response.completed","sequence_number":3,"response":` + completed + "}\n\n",
+	}
+
+	client, _ := newOpenAIStreamClient(t, http.StatusOK, events)
+	stream, err := client.GenerateStream(context.Background(), Request{
+		MaxTokens: 64,
+		Messages:  []Message{User("weather?")},
+		Tools:     []Tool{{Name: "get_weather", InputSchema: structuredSchema}},
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+
+	var toolInput strings.Builder
+	for stream.Next() {
+		chunk := stream.Current()
+		if chunk.Kind != KindToolInput {
+			t.Fatalf("chunk kind = %v, want KindToolInput: %+v", chunk.Kind, chunk)
+		}
+		toolInput.WriteString(chunk.Text)
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	if toolInput.String() != `{"city":"SF"}` {
+		t.Fatalf("streamed tool input = %q", toolInput.String())
+	}
+
+	response, err := stream.Response()
+	if err != nil {
+		t.Fatalf("Response(): %v", err)
+	}
+	if response.Text != "" {
+		t.Fatalf("Text = %q, want empty for a tool-only turn", response.Text)
+	}
+	if response.CompletionReason != CompletionReasonToolUse {
+		t.Fatalf("completion reason = %q", response.CompletionReason)
+	}
+	if len(response.ToolCalls) != 1 || response.ToolCalls[0].ID != "call_a" ||
+		response.ToolCalls[0].Name != "get_weather" || string(response.ToolCalls[0].Input) != `{"city":"SF"}` {
+		t.Fatalf("tool calls = %#v", response.ToolCalls)
+	}
+}
+
 func newOpenAIStreamClient(t *testing.T, status int, events []string) (*Client, *capturedHTTPRequest) {
 	t.Helper()
 

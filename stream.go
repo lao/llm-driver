@@ -87,7 +87,11 @@ func (s *Stream) Next() bool {
 			continue
 		}
 		s.current = chunk
-		s.text.WriteString(chunk.Text)
+		// Only text deltas build Response.Text; tool-input deltas are surfaced to
+		// the caller via Current but must not pollute the response text.
+		if chunk.Kind == core.KindText {
+			s.text.WriteString(chunk.Text)
+		}
 		return true
 	}
 }

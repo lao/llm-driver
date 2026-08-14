@@ -60,7 +60,7 @@ func wantImplemented(tg target, feature Feature) bool {
 	switch feature {
 	case FeatureStructuredOutput, FeatureReasoningEffort:
 		return true
-	case FeatureSamplingParams, FeatureUserID:
+	case FeatureTools, FeatureSamplingParams, FeatureUserID:
 		return tg.flavor == FlavorAPI
 	case FeatureTopK, FeatureStopSequences:
 		return tg.provider == ProviderClaude && tg.flavor == FlavorAPI
@@ -135,11 +135,11 @@ func TestValidateRequestForIsNoOpForTodaysRequest(t *testing.T) {
 func TestCapabilityGateRejectsUnsupportedFeature(t *testing.T) {
 	t.Parallel()
 
-	err := validateFeaturesFor(ProviderClaude, FlavorAPI, []Feature{FeatureTools})
+	err := validateFeaturesFor(ProviderClaude, FlavorAPI, []Feature{FeatureWebSearch})
 	if !errors.Is(err, ErrUnsupportedFeature) {
 		t.Fatalf("gate error = %v, want ErrUnsupportedFeature", err)
 	}
-	for _, want := range []string{string(FeatureTools), "claude/api"} {
+	for _, want := range []string{string(FeatureWebSearch), "claude/api"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("gate error = %q, missing %q", err.Error(), want)
 		}

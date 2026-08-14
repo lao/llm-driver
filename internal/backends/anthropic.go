@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -68,12 +69,13 @@ func (b *anthropicBackend) params(request core.Request) anthropic.MessageNewPara
 		params.System = []anthropic.TextBlockParam{{Text: request.System}}
 	}
 	for _, message := range request.Messages {
-		block := anthropic.NewTextBlock(message.Text)
-		if message.Role == core.RoleAssistant {
-			params.Messages = append(params.Messages, anthropic.NewAssistantMessage(block))
-		} else {
-			params.Messages = append(params.Messages, anthropic.NewUserMessage(block))
-		}
+		params.Messages = append(params.Messages, anthropicMessage(message))
+	}
+	if len(request.Tools) > 0 {
+		params.Tools = anthropicTools(request.Tools)
+	}
+	if request.ToolChoice.Mode != core.ToolChoiceAuto {
+		params.ToolChoice = anthropicToolChoice(request.ToolChoice)
 	}
 	if request.OutputSchema != nil {
 		// Validated in core, so SchemaObject cannot fail here.
@@ -105,6 +107,67 @@ func (b *anthropicBackend) params(request core.Request) anthropic.MessageNewPara
 	return params
 }
 
+// anthropicMessage maps a neutral message to an SDK message. A text-only
+// message keeps the exact single-text-block form earlier phases produced; a
+// parts message expands to the matching content blocks.
+func anthropicMessage(message core.Message) anthropic.MessageParam {
+	if len(message.Parts) == 0 {
+		block := anthropic.NewTextBlock(message.Text)
+		if message.Role == core.RoleAssistant {
+			return anthropic.NewAssistantMessage(block)
+		}
+		return anthropic.NewUserMessage(block)
+	}
+	blocks := make([]anthropic.ContentBlockParamUnion, 0, len(message.Parts))
+	for _, part := range message.Parts {
+		switch p := part.(type) {
+		case core.TextPart:
+			blocks = append(blocks, anthropic.NewTextBlock(p.Text))
+		case core.ToolCallPart:
+			blocks = append(blocks, anthropic.NewToolUseBlock(p.ID, json.RawMessage(p.Input), p.Name))
+		case core.ToolResultPart:
+			blocks = append(blocks, anthropic.NewToolResultBlock(p.ToolCallID, p.Content, p.IsError))
+		default:
+			panic(fmt.Sprintf("anthropic: unhandled part type %T (core validation should reject it)", part))
+		}
+	}
+	if message.Role == core.RoleAssistant {
+		return anthropic.NewAssistantMessage(blocks...)
+	}
+	return anthropic.NewUserMessage(blocks...)
+}
+
+// anthropicTools maps neutral tools to the SDK's custom-tool params. The schema
+// is validated as a JSON object in core, so the unmarshal cannot fail here.
+func anthropicTools(tools []core.Tool) []anthropic.ToolUnionParam {
+	mapped := make([]anthropic.ToolUnionParam, 0, len(tools))
+	for _, tool := range tools {
+		var schema anthropic.ToolInputSchemaParam
+		_ = json.Unmarshal(tool.InputSchema, &schema)
+		toolParam := anthropic.ToolParam{Name: tool.Name, InputSchema: schema}
+		if tool.Description != "" {
+			toolParam.Description = anthropic.String(tool.Description)
+		}
+		mapped = append(mapped, anthropic.ToolUnionParam{OfTool: &toolParam})
+	}
+	return mapped
+}
+
+// anthropicToolChoice maps a non-auto neutral choice to the SDK union. Required
+// maps to "any" (the model must use some tool).
+func anthropicToolChoice(choice core.ToolChoice) anthropic.ToolChoiceUnionParam {
+	switch choice.Mode {
+	case core.ToolChoiceNone:
+		return anthropic.ToolChoiceUnionParam{OfNone: &anthropic.ToolChoiceNoneParam{}}
+	case core.ToolChoiceRequired:
+		return anthropic.ToolChoiceUnionParam{OfAny: &anthropic.ToolChoiceAnyParam{}}
+	case core.ToolChoiceTool:
+		return anthropic.ToolChoiceParamOfTool(choice.Name)
+	default:
+		return anthropic.ToolChoiceUnionParam{}
+	}
+}
+
 // anthropicChunkStream turns Messages SSE events into chunks while the SDK's
 // Message.Accumulate helper rebuilds the final message for finish.
 type anthropicChunkStream struct {
@@ -123,8 +186,15 @@ func (s *anthropicChunkStream) Recv() (core.Chunk, error) {
 		if event.Type == "message_stop" {
 			s.stopped = true
 		}
-		if event.Type == "content_block_delta" && event.Delta.Type == "text_delta" {
-			return core.Chunk{Text: event.Delta.Text}, nil
+		if event.Type == "content_block_delta" {
+			switch event.Delta.Type {
+			case "text_delta":
+				return core.Chunk{Text: event.Delta.Text}, nil
+			case "input_json_delta":
+				// The SDK's Accumulate rebuilds the full tool_use input, so Finish
+				// reports the parsed calls; this surfaces the raw JSON as progress.
+				return core.Chunk{Kind: core.KindToolInput, Text: event.Delta.PartialJSON}, nil
+			}
 		}
 	}
 	if err := s.stream.Err(); err != nil {
@@ -162,15 +232,20 @@ func (s *anthropicChunkStream) Close() error {
 
 func anthropicResponse(message *anthropic.Message) *core.Response {
 	var text strings.Builder
+	var toolCalls []core.ToolCall
 	for _, block := range message.Content {
-		if block.Type == "text" {
+		switch block.Type {
+		case "text":
 			text.WriteString(block.Text)
+		case "tool_use":
+			toolCalls = append(toolCalls, core.ToolCall{ID: block.ID, Name: block.Name, Input: block.Input})
 		}
 	}
 	return &core.Response{
 		ID:               message.ID,
 		Model:            string(message.Model),
 		Text:             text.String(),
+		ToolCalls:        toolCalls,
 		CompletionReason: normalizeAnthropicCompletionReason(message.StopReason),
 		Usage: core.Usage{
 			InputTokens:              int(message.Usage.InputTokens),

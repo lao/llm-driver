@@ -376,6 +376,115 @@ func TestAnthropicStreamMapsSamplingParams(t *testing.T) {
 	}
 }
 
+func TestAnthropicGenerateToolRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	// First turn: the model returns two parallel tool_use blocks.
+	response := `{"id":"msg_t","type":"message","role":"assistant","model":"claude-test",` +
+		`"content":[` +
+		`{"type":"tool_use","id":"call_a","name":"get_weather","input":{"city":"SF"}},` +
+		`{"type":"tool_use","id":"call_b","name":"get_time","input":{"tz":"PT"}}` +
+		`],"stop_reason":"tool_use","usage":{"input_tokens":5,"output_tokens":3}}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{
+		Provider: ProviderClaude,
+		Flavor:   FlavorAPI,
+		Model:    "claude-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	weatherSchema := json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}}}`)
+	result, err := client.Generate(context.Background(), Request{
+		MaxTokens:  64,
+		Messages:   []Message{User("weather and time?")},
+		Tools:      []Tool{{Name: "get_weather", Description: "weather by city", InputSchema: weatherSchema}, {Name: "get_time", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: ToolChoice{Mode: ToolChoiceRequired},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	// Request maps tools and tool_choice.
+	tools, ok := captured.body["tools"].([]any)
+	if !ok || len(tools) != 2 {
+		t.Fatalf("tools = %#v", captured.body["tools"])
+	}
+	tool0 := tools[0].(map[string]any)
+	if tool0["name"] != "get_weather" || tool0["description"] != "weather by city" {
+		t.Fatalf("tools[0] = %#v", tool0)
+	}
+	if schema, ok := tool0["input_schema"].(map[string]any); !ok || schema["type"] != "object" {
+		t.Fatalf("tools[0].input_schema = %#v", tool0["input_schema"])
+	}
+	if choice, ok := captured.body["tool_choice"].(map[string]any); !ok || choice["type"] != "any" {
+		t.Fatalf("tool_choice = %#v", captured.body["tool_choice"])
+	}
+
+	// Parallel tool calls preserved in order, with tool_use completion reason.
+	if result.CompletionReason != CompletionReasonToolUse {
+		t.Fatalf("completion reason = %q, want %q", result.CompletionReason, CompletionReasonToolUse)
+	}
+	if len(result.ToolCalls) != 2 {
+		t.Fatalf("tool calls = %#v", result.ToolCalls)
+	}
+	if result.ToolCalls[0].ID != "call_a" || result.ToolCalls[0].Name != "get_weather" || string(result.ToolCalls[0].Input) != `{"city":"SF"}` {
+		t.Fatalf("tool call 0 = %#v", result.ToolCalls[0])
+	}
+	if result.ToolCalls[1].ID != "call_b" || result.ToolCalls[1].Name != "get_time" {
+		t.Fatalf("tool call 1 = %#v", result.ToolCalls[1])
+	}
+
+	// Second turn: the caller echoes the tool call and replies with results; the
+	// follow-up request must carry the assistant tool_use and user tool_result.
+	follow, captured2 := newAPITestServer(t, http.StatusOK,
+		`{"id":"msg_f","type":"message","role":"assistant","model":"claude-test",`+
+			`"content":[{"type":"text","text":"Sunny, noon."}],"stop_reason":"end_turn","usage":{"input_tokens":9,"output_tokens":4}}`)
+	client2, err := New(Config{Provider: ProviderClaude, Flavor: FlavorAPI, Model: "claude-test", APIKey: "test-key", BaseURL: follow.URL})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	final, err := client2.Generate(context.Background(), Request{
+		MaxTokens: 64,
+		Messages: []Message{
+			User("weather and time?"),
+			{Role: RoleAssistant, Parts: []Part{
+				ToolCallPart{ID: "call_a", Name: "get_weather", Input: result.ToolCalls[0].Input},
+				ToolCallPart{ID: "call_b", Name: "get_time", Input: result.ToolCalls[1].Input},
+			}},
+			ToolResult("call_a", "Sunny", false),
+			ToolResult("call_b", "noon", false),
+		},
+	})
+	if err != nil {
+		t.Fatalf("follow-up Generate(): %v", err)
+	}
+	if final.Text != "Sunny, noon." {
+		t.Fatalf("final text = %q", final.Text)
+	}
+
+	messages := captured2.body["messages"].([]any)
+	if len(messages) != 4 {
+		t.Fatalf("follow-up messages = %#v", messages)
+	}
+	assistant := messages[1].(map[string]any)
+	blocks := assistant["content"].([]any)
+	if assistant["role"] != "assistant" || len(blocks) != 2 {
+		t.Fatalf("assistant echo = %#v", assistant)
+	}
+	toolUse := blocks[0].(map[string]any)
+	if toolUse["type"] != "tool_use" || toolUse["id"] != "call_a" || toolUse["name"] != "get_weather" {
+		t.Fatalf("assistant tool_use = %#v", toolUse)
+	}
+	toolResult := messages[2].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if toolResult["type"] != "tool_result" || toolResult["tool_use_id"] != "call_a" {
+		t.Fatalf("user tool_result = %#v", toolResult)
+	}
+}
+
 func TestAnthropicGenerateStructuredOutputRejectsNonJSON(t *testing.T) {
 	t.Parallel()
 

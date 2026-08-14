@@ -2,11 +2,14 @@ package backends
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/packages/ssestream"
 	"github.com/openai/openai-go/v3/responses"
 
@@ -64,19 +67,22 @@ func (b *openAIBackend) GenerateStream(ctx context.Context, request core.Request
 func (b *openAIBackend) params(request core.Request) responses.ResponseNewParams {
 	input := make(responses.ResponseInputParam, 0, len(request.Messages))
 	for _, message := range request.Messages {
-		content := responses.ResponseInputMessageContentListParam{
-			responses.ResponseInputContentParamOfInputText(message.Text),
+		if len(message.Parts) == 0 {
+			input = append(input, openAITextMessage(message.Role, message.Text))
+			continue
 		}
-		item := responses.ResponseInputItemParamOfMessage(
-			content,
-			responses.EasyInputMessageRole(message.Role),
-		)
-		if message.Role == core.RoleAssistant {
-			// Preserve the completed-answer phase so current Codex models keep
-			// full follow-up quality on prior assistant turns.
-			item.OfMessage.Phase = responses.EasyInputMessagePhaseFinalAnswer
+		for _, part := range message.Parts {
+			switch p := part.(type) {
+			case core.TextPart:
+				input = append(input, openAITextMessage(message.Role, p.Text))
+			case core.ToolCallPart:
+				input = append(input, responses.ResponseInputItemParamOfFunctionCall(string(p.Input), p.ID, p.Name))
+			case core.ToolResultPart:
+				input = append(input, responses.ResponseInputItemParamOfFunctionCallOutput(p.ToolCallID, p.Content))
+			default:
+				panic(fmt.Sprintf("openai: unhandled part type %T (core validation should reject it)", part))
+			}
 		}
-		input = append(input, item)
 	}
 
 	params := responses.ResponseNewParams{
@@ -104,6 +110,12 @@ func (b *openAIBackend) params(request core.Request) responses.ResponseNewParams
 	if request.UserID != "" {
 		params.SafetyIdentifier = openai.String(request.UserID)
 	}
+	if len(request.Tools) > 0 {
+		params.Tools = openAITools(request.Tools)
+	}
+	if request.ToolChoice.Mode != core.ToolChoiceAuto {
+		params.ToolChoice = openAIToolChoice(request.ToolChoice)
+	}
 	if request.OutputSchema != nil {
 		// Validated in core, so SchemaObject cannot fail here.
 		schema, _ := request.OutputSchema.SchemaObject()
@@ -116,6 +128,51 @@ func (b *openAIBackend) params(request core.Request) responses.ResponseNewParams
 		params.Text = responses.ResponseTextConfigParam{Format: format}
 	}
 	return params
+}
+
+// openAITextMessage builds one input message item, preserving the final-answer
+// phase on assistant turns that the text path has always set.
+func openAITextMessage(role core.Role, text string) responses.ResponseInputItemUnionParam {
+	content := responses.ResponseInputMessageContentListParam{
+		responses.ResponseInputContentParamOfInputText(text),
+	}
+	item := responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRole(role))
+	if role == core.RoleAssistant {
+		// Preserve the completed-answer phase so current Codex models keep full
+		// follow-up quality on prior assistant turns.
+		item.OfMessage.Phase = responses.EasyInputMessagePhaseFinalAnswer
+	}
+	return item
+}
+
+// openAITools maps neutral tools to Responses function tools. The schema is
+// validated as a JSON object in core, so the unmarshal cannot fail here.
+func openAITools(tools []core.Tool) []responses.ToolUnionParam {
+	mapped := make([]responses.ToolUnionParam, 0, len(tools))
+	for _, tool := range tools {
+		var parameters map[string]any
+		_ = json.Unmarshal(tool.InputSchema, &parameters)
+		function := responses.ToolParamOfFunction(tool.Name, parameters, false)
+		if tool.Description != "" {
+			function.OfFunction.Description = openai.String(tool.Description)
+		}
+		mapped = append(mapped, function)
+	}
+	return mapped
+}
+
+// openAIToolChoice maps a non-auto neutral choice to the Responses union.
+func openAIToolChoice(choice core.ToolChoice) responses.ResponseNewParamsToolChoiceUnion {
+	switch choice.Mode {
+	case core.ToolChoiceNone:
+		return responses.ResponseNewParamsToolChoiceUnion{OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsNone)}
+	case core.ToolChoiceRequired:
+		return responses.ResponseNewParamsToolChoiceUnion{OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsRequired)}
+	case core.ToolChoiceTool:
+		return responses.ResponseNewParamsToolChoiceUnion{OfFunctionTool: &responses.ToolChoiceFunctionParam{Name: choice.Name}}
+	default:
+		return responses.ResponseNewParamsToolChoiceUnion{}
+	}
 }
 
 // openAIChunkStream turns Responses SSE output-text deltas into chunks and
@@ -132,6 +189,10 @@ func (s *openAIChunkStream) Recv() (core.Chunk, error) {
 		switch event.Type {
 		case "response.output_text.delta", "response.refusal.delta":
 			return core.Chunk{Text: event.Delta}, nil
+		case "response.function_call_arguments.delta":
+			// The completed response carries the parsed calls, so Finish reports
+			// them; this surfaces the raw JSON arguments as progress.
+			return core.Chunk{Kind: core.KindToolInput, Text: event.Delta}, nil
 		case "response.completed", "response.failed", "response.incomplete":
 			response := event.Response
 			s.completed = &response
@@ -194,6 +255,7 @@ func openAIResponse(response *responses.Response) *core.Response {
 		ID:               response.ID,
 		Model:            string(response.Model),
 		Text:             openAIResponseText(response),
+		ToolCalls:        openAIToolCalls(response),
 		CompletionReason: openAICompletionReason(response),
 		Usage: core.Usage{
 			InputTokens:              int(response.Usage.InputTokens),
@@ -255,6 +317,22 @@ func openAIResponseText(response *responses.Response) string {
 	return text.String()
 }
 
+// openAIToolCalls extracts the function_call output items as neutral tool calls,
+// preserving provider order (parallel calls included).
+func openAIToolCalls(response *responses.Response) []core.ToolCall {
+	var toolCalls []core.ToolCall
+	for _, item := range response.Output {
+		if item.Type == "function_call" {
+			toolCalls = append(toolCalls, core.ToolCall{
+				ID:    item.CallID,
+				Name:  item.Name,
+				Input: json.RawMessage(item.Arguments.OfString),
+			})
+		}
+	}
+	return toolCalls
+}
+
 func openAICompletionReason(response *responses.Response) core.CompletionReason {
 	if response.Status == responses.ResponseStatusIncomplete {
 		switch response.IncompleteDetails.Reason {
@@ -264,12 +342,21 @@ func openAICompletionReason(response *responses.Response) core.CompletionReason 
 			return core.CompletionReasonContentFilter
 		}
 	}
+	hasToolCall := false
 	for _, item := range response.Output {
+		if item.Type == "function_call" {
+			hasToolCall = true
+		}
 		for _, content := range item.Content {
 			if content.Type == "refusal" {
 				return core.CompletionReasonRefusal
 			}
 		}
+	}
+	// A completed turn that requested tools maps to tool_use, matching Anthropic's
+	// stop_reason so the round-trip normalizes identically on both API flavors.
+	if hasToolCall {
+		return core.CompletionReasonToolUse
 	}
 	return core.CompletionReasonStop
 }

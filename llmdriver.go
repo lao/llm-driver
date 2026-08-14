@@ -31,10 +31,28 @@ type (
 	// Error adds target and operation context to configuration and runtime
 	// failures.
 	Error = core.Error
-	// Chunk is one incremental piece of streaming response text.
+	// Chunk is one incremental piece of a streaming response.
 	Chunk = core.Chunk
+	// ChunkKind classifies a streaming Chunk; the zero value is text.
+	ChunkKind = core.ChunkKind
 	// Feature identifies an optional generation capability a target may reject.
 	Feature = core.Feature
+	// Part is one piece of a Message's structured content.
+	Part = core.Part
+	// TextPart is plain text content within a Parts message.
+	TextPart = core.TextPart
+	// ToolCallPart is an assistant tool-call echo carried back into a request.
+	ToolCallPart = core.ToolCallPart
+	// ToolResultPart is the caller-supplied result of a tool call.
+	ToolResultPart = core.ToolResultPart
+	// Tool describes a caller-executed tool the model may call.
+	Tool = core.Tool
+	// ToolChoice controls tool selection; the zero value is auto.
+	ToolChoice = core.ToolChoice
+	// ToolChoiceMode selects how the model may use tools.
+	ToolChoiceMode = core.ToolChoiceMode
+	// ToolCall is a tool invocation the model requested.
+	ToolCall = core.ToolCall
 )
 
 const (
@@ -98,6 +116,20 @@ const (
 	FeatureContinuation = core.FeatureContinuation
 	// FeatureTokenCounting requests standalone token counting.
 	FeatureTokenCounting = core.FeatureTokenCounting
+
+	// KindText marks a response-text streaming delta; it is the zero value.
+	KindText = core.KindText
+	// KindToolInput marks a delta of a tool call's JSON input arguments.
+	KindToolInput = core.KindToolInput
+
+	// ToolChoiceAuto lets the model decide whether to call a tool (zero value).
+	ToolChoiceAuto = core.ToolChoiceAuto
+	// ToolChoiceNone forbids tool calls.
+	ToolChoiceNone = core.ToolChoiceNone
+	// ToolChoiceRequired forces the model to call some tool.
+	ToolChoiceRequired = core.ToolChoiceRequired
+	// ToolChoiceTool forces the model to call the named tool.
+	ToolChoiceTool = core.ToolChoiceTool
 )
 
 var (
@@ -125,4 +157,10 @@ func User(text string) Message {
 // Assistant builds an assistant-role text message.
 func Assistant(text string) Message {
 	return core.Assistant(text)
+}
+
+// ToolResult builds a user-role message carrying a single tool result, matched
+// to a prior ToolCall by id. isErr marks content as a tool execution error.
+func ToolResult(id string, content string, isErr bool) Message {
+	return core.ToolResult(id, content, isErr)
 }
