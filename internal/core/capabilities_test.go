@@ -39,14 +39,16 @@ func TestCapabilityTableCoversEveryTargetAndFeature(t *testing.T) {
 	}
 }
 
-// Phase 1 ships the baseline only: no gated feature is supported by any target.
-func TestPhase1SupportsNoGatedFeature(t *testing.T) {
+// Structured output is the only feature implemented so far, and every target
+// supports it. Every other gated feature is still rejected everywhere.
+func TestSupportsMatchesImplementedFeatures(t *testing.T) {
 	t.Parallel()
 
 	for _, tg := range allTargets() {
 		for _, feature := range allFeatures {
-			if Supports(tg.provider, tg.flavor, feature) {
-				t.Errorf("%s/%s unexpectedly supports %q", tg.provider, tg.flavor, feature)
+			want := feature == FeatureStructuredOutput
+			if got := Supports(tg.provider, tg.flavor, feature); got != want {
+				t.Errorf("Supports(%s/%s, %q) = %v, want %v", tg.provider, tg.flavor, feature, got, want)
 			}
 		}
 	}
@@ -66,11 +68,11 @@ func TestValidateRequestForIsNoOpForTodaysRequest(t *testing.T) {
 func TestCapabilityGateRejectsUnsupportedFeature(t *testing.T) {
 	t.Parallel()
 
-	err := validateFeaturesFor(ProviderClaude, FlavorAPI, []Feature{FeatureStructuredOutput})
+	err := validateFeaturesFor(ProviderClaude, FlavorAPI, []Feature{FeatureReasoningEffort})
 	if !errors.Is(err, ErrUnsupportedFeature) {
 		t.Fatalf("gate error = %v, want ErrUnsupportedFeature", err)
 	}
-	for _, want := range []string{string(FeatureStructuredOutput), "claude/api"} {
+	for _, want := range []string{string(FeatureReasoningEffort), "claude/api"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("gate error = %q, missing %q", err.Error(), want)
 		}

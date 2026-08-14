@@ -62,14 +62,13 @@ type target struct {
 }
 
 // featureSupport maps each target to the optional features it honors. A feature
-// absent from a target's set is rejected with ErrUnsupportedFeature. Phase 1
-// ships the baseline only, so every set is empty; later phases add the cells
-// they implement.
+// absent from a target's set is rejected with ErrUnsupportedFeature. Later
+// phases add the cells they implement.
 var featureSupport = map[target]map[Feature]bool{
-	{ProviderClaude, FlavorAPI}: {},
-	{ProviderClaude, FlavorCLI}: {},
-	{ProviderOpenAI, FlavorAPI}: {},
-	{ProviderOpenAI, FlavorCLI}: {},
+	{ProviderClaude, FlavorAPI}: {FeatureStructuredOutput: true},
+	{ProviderClaude, FlavorCLI}: {FeatureStructuredOutput: true},
+	{ProviderOpenAI, FlavorAPI}: {FeatureStructuredOutput: true},
+	{ProviderOpenAI, FlavorCLI}: {FeatureStructuredOutput: true},
 }
 
 // AllFeatures returns every Feature in parity-inventory order. It lets callers
@@ -85,11 +84,14 @@ func Supports(provider Provider, flavor Flavor, feature Feature) bool {
 }
 
 // featuresOf returns the optional features the request exercises, in inventory
-// order. With today's Request fields it is always empty; each later phase adds
-// one detection case as it adds a field, and the gate below picks it up
-// automatically.
+// order. Each later phase adds one detection case as it adds a field, and the
+// gate below picks it up automatically.
 func featuresOf(r Request) []Feature {
-	return nil
+	var features []Feature
+	if r.OutputSchema != nil {
+		features = append(features, FeatureStructuredOutput)
+	}
+	return features
 }
 
 // ValidateRequestFor reports whether the target accepts every feature the

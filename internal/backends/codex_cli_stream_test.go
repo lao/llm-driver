@@ -3,6 +3,8 @@ package backends
 import (
 	"context"
 	"errors"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -328,4 +330,130 @@ func TestCodexCLIStreamFailureWithoutMessage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCodexCLIStreamStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{
+		codexStreamThread,
+		`{"type":"item.updated","item":{"id":"m","type":"agent_message","text":"{\"answer\":"}}`,
+		`{"type":"item.updated","item":{"id":"m","type":"agent_message","text":"{\"answer\":\"42\"}"}}`,
+		`{"type":"item.completed","item":{"id":"m","type":"agent_message","text":"{\"answer\":\"42\"}"}}`,
+		`{"type":"turn.completed","usage":{}}`,
+	}
+	runner := &fakeStreamingRunner{lines: lines}
+	client := newCodexStreamClient(runner.run)
+
+	stream, err := client.GenerateStream(context.Background(), core.Request{
+		MaxTokens:    32,
+		Messages:     []core.Message{core.User("q")},
+		OutputSchema: &core.OutputSchema{Name: "answer", Schema: testSchema},
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+
+	chunks, err, response := collectStream(t, stream)
+	if err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	// The schema is passed via --output-schema pointing at a temp file.
+	if i := slices.Index(runner.args, "--output-schema"); i < 0 || i+1 >= len(runner.args) || runner.args[i+1] == "" {
+		t.Fatalf("args = %#v, want --output-schema <path>", runner.args)
+	}
+	if strings.Join(chunks, "") != testJSON {
+		t.Fatalf("chunks = %#v, want the JSON document", chunks)
+	}
+	if response.Text != testJSON || string(response.StructuredOutput) != testJSON {
+		t.Fatalf("response Text=%q StructuredOutput=%q, want %q", response.Text, response.StructuredOutput, testJSON)
+	}
+}
+
+// TestCodexCLISchemaTempFileLifecycle asserts the --output-schema temp file is
+// removed on every exit path: batch success, batch error, stream close, and a
+// failed stream start. It is not parallel because it redirects the package's
+// schema temp dir to observe removal.
+func TestCodexCLISchemaTempFileLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	previous := schemaTempDir
+	schemaTempDir = dir
+	t.Cleanup(func() { schemaTempDir = previous })
+
+	assertEmpty := func(stage string) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("%s: read temp dir: %v", stage, err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("%s: schema temp file leaked: %v", stage, entries)
+		}
+	}
+
+	request := core.Request{
+		MaxTokens:    32,
+		Messages:     []core.Message{core.User("q")},
+		OutputSchema: &core.OutputSchema{Name: "answer", Schema: testSchema},
+	}
+	successOutput := []byte(codexStreamThread + "\n" +
+		`{"type":"item.completed","item":{"id":"m","type":"agent_message","text":"{\"answer\":\"42\"}"}}` + "\n" +
+		codexStreamTurn + "\n")
+
+	t.Run("batch success", func(t *testing.T) {
+		backend := newCodexCLIBackend(cliBackendConfig{
+			model: "gpt-test",
+			runner: func(context.Context, string, []string, []byte) ([]byte, []byte, int, error) {
+				return successOutput, nil, 0, nil
+			},
+		})
+		if _, err := backend.Generate(context.Background(), request); err != nil {
+			t.Fatalf("Generate(): %v", err)
+		}
+		assertEmpty("batch success")
+	})
+
+	t.Run("batch error", func(t *testing.T) {
+		backend := newCodexCLIBackend(cliBackendConfig{
+			model: "gpt-test",
+			runner: func(context.Context, string, []string, []byte) ([]byte, []byte, int, error) {
+				return nil, []byte("boom"), 1, nil
+			},
+		})
+		if _, err := backend.Generate(context.Background(), request); err == nil {
+			t.Fatal("Generate() error = nil, want a process failure")
+		}
+		assertEmpty("batch error")
+	})
+
+	t.Run("stream close", func(t *testing.T) {
+		runner := &fakeStreamingRunner{lines: []string{
+			codexStreamThread,
+			`{"type":"item.completed","item":{"id":"m","type":"agent_message","text":"{\"answer\":\"42\"}"}}`,
+			codexStreamTurn,
+		}}
+		backend := newCodexCLIBackend(cliBackendConfig{model: "gpt-test", streamRunner: runner.run})
+		source, err := backend.GenerateStream(context.Background(), request)
+		if err != nil {
+			t.Fatalf("GenerateStream(): %v", err)
+		}
+		for {
+			if _, err := source.Recv(); err != nil {
+				break
+			}
+		}
+		if err := source.Close(); err != nil {
+			t.Fatalf("Close(): %v", err)
+		}
+		assertEmpty("stream close")
+	})
+
+	t.Run("stream start error", func(t *testing.T) {
+		runner := &fakeStreamingRunner{startErr: core.ErrExecutableNotFound}
+		backend := newCodexCLIBackend(cliBackendConfig{model: "gpt-test", streamRunner: runner.run})
+		if _, err := backend.GenerateStream(context.Background(), request); err == nil {
+			t.Fatal("GenerateStream() error = nil, want a start failure")
+		}
+		assertEmpty("stream start error")
+	})
 }

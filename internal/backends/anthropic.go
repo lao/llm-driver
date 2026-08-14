@@ -40,7 +40,11 @@ func (b *anthropicBackend) Generate(ctx context.Context, request core.Request) (
 	if err != nil {
 		return nil, normalizeAnthropicError(err)
 	}
-	return anthropicResponse(message), nil
+	response := anthropicResponse(message)
+	if err := setStructuredOutput(response, request.OutputSchema, core.ProviderClaude, core.FlavorAPI, "generate"); err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
 func (b *anthropicBackend) GenerateStream(ctx context.Context, request core.Request) (core.ChunkStream, error) {
@@ -51,7 +55,7 @@ func (b *anthropicBackend) GenerateStream(ctx context.Context, request core.Requ
 		_ = stream.Close()
 		return nil, normalizeAnthropicStreamError(err)
 	}
-	return &anthropicChunkStream{stream: stream}, nil
+	return &anthropicChunkStream{stream: stream, schema: request.OutputSchema}, nil
 }
 
 func (b *anthropicBackend) params(request core.Request) anthropic.MessageNewParams {
@@ -71,6 +75,13 @@ func (b *anthropicBackend) params(request core.Request) anthropic.MessageNewPara
 			params.Messages = append(params.Messages, anthropic.NewUserMessage(block))
 		}
 	}
+	if request.OutputSchema != nil {
+		// Validated in core, so SchemaObject cannot fail here.
+		schema, _ := request.OutputSchema.SchemaObject()
+		params.OutputConfig = anthropic.OutputConfigParam{
+			Format: anthropic.JSONOutputFormatParam{Schema: schema},
+		}
+	}
 	return params
 }
 
@@ -79,6 +90,7 @@ func (b *anthropicBackend) params(request core.Request) anthropic.MessageNewPara
 type anthropicChunkStream struct {
 	stream  *ssestream.Stream[anthropic.MessageStreamEventUnion]
 	message anthropic.Message
+	schema  *core.OutputSchema
 	stopped bool
 }
 
@@ -114,7 +126,14 @@ func (s *anthropicChunkStream) Finish() (*core.Response, error) {
 			Message:   "Anthropic stream ended without a completed message",
 		}
 	}
-	return anthropicResponse(&s.message), nil
+	response := anthropicResponse(&s.message)
+	// The accumulated message text equals the concatenated deltas the root
+	// Stream reports, so validating it here populates StructuredOutput from the
+	// same bytes the caller received.
+	if err := setStructuredOutput(response, s.schema, core.ProviderClaude, core.FlavorAPI, "generate_stream"); err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
 func (s *anthropicChunkStream) Close() error {

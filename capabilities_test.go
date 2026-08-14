@@ -137,14 +137,16 @@ func splitRow(line string) []string {
 	return cells
 }
 
-func TestSupportsRejectsEveryGatedFeatureInPhase1(t *testing.T) {
+func TestSupportsMatchesImplementedFeatures(t *testing.T) {
 	t.Parallel()
 
 	for _, mt := range matrixColumns {
 		client := clientFor(t, mt)
 		for _, row := range matrixRows {
-			if client.Supports(row.feature) {
-				t.Errorf("%s/%s unexpectedly supports %q", mt.provider, mt.flavor, row.feature)
+			// Structured output is implemented on every target; nothing else is yet.
+			want := row.feature == FeatureStructuredOutput
+			if got := client.Supports(row.feature); got != want {
+				t.Errorf("%s/%s Supports(%q) = %v, want %v", mt.provider, mt.flavor, row.feature, got, want)
 			}
 		}
 	}

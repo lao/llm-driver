@@ -167,7 +167,7 @@ and target.
 | Feature | claude/api | openai/api | claude/cli | codex/cli |
 | --- | --- | --- | --- | --- |
 | System, messages, MaxTokens, streaming | ✓ | ✓ | ✓ | ✓ |
-| Structured output (JSON schema) | ✗ | ✗ | ✗ | ✗ |
+| Structured output (JSON schema) | ✓ | ✓ | ✓ | ✓ |
 | Reasoning effort | ✗ | ✗ | ✗ | ✗ |
 | Reasoning/thinking visibility | ✗ | ✗ | ✗ | ✗ |
 | Tool calling (caller-executed) | ✗ | ✗ | ✗ | ✗ |
@@ -181,9 +181,56 @@ and target.
 | Conversation continuation by ID | ✗ | ✗ | ✗ | ✗ |
 | Token counting | ✗ | ✗ | ✗ | ✗ |
 
-The optional features are not yet implemented; later releases flip cells as
-each target gains support. `codex/cli` is the `openai` provider with the `cli`
-flavor.
+Structured output is supported on every target; the remaining optional features
+are not yet implemented, and later releases flip cells as each target gains
+support. `codex/cli` is the `openai` provider with the `cli` flavor.
+
+## Structured output
+
+Set `Request.OutputSchema` to constrain the response to a JSON document matching
+a JSON Schema. The result is returned on `Response.StructuredOutput` (the
+JSON-validated bytes), while `Response.Text` keeps the raw model output.
+
+```go
+response, err := client.Generate(ctx, llmdriver.Request{
+	Messages:  []llmdriver.Message{llmdriver.User("Extract the year from: shipped in 1998.")},
+	MaxTokens: 256,
+	OutputSchema: &llmdriver.OutputSchema{
+		Name:   "extraction",
+		Schema: json.RawMessage(`{"type":"object","properties":{"year":{"type":"integer"}},"required":["year"]}`),
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(string(response.StructuredOutput)) // e.g. {"year":1998}
+```
+
+`Schema` must be a JSON object; an invalid schema fails with `ErrInvalidRequest`
+before any target is invoked. `Name` is required by the OpenAI mapping and
+defaulted when empty; other targets ignore it. If the model returns output that
+is not valid JSON, the call fails with a normalized `*Error`.
+
+Each target maps the schema natively: `claude/api` via `output_config.format`,
+`openai/api` via `text.format` json_schema (strict), `claude/cli` via
+`--json-schema`, and `codex/cli` via `--output-schema` (written to a private
+0600 temp file that is removed when the call completes). Streaming works the
+same way: chunks stream the raw JSON text and `StructuredOutput` is populated on
+the final `Response`.
+
+Note: `openai/api` maps with `strict: true`, so a schema it accepts must set
+`additionalProperties: false` and mark every property required. The same schema
+may succeed on the other three targets and be rejected by OpenAI — write schemas
+to OpenAI's strict subset for portable requests.
+
+The example accepts a schema file via `--schema`:
+
+```bash
+go run ./examples/switchable \
+  --provider claude --flavor api --model claude-sonnet-4-5 \
+  --prompt "Extract the year from: shipped in 1998." \
+  --schema ./schema.json
+```
 
 ## Scope and CLI differences
 
@@ -212,9 +259,9 @@ the hosted APIs:
   produce token-sized deltas. `codex exec --json` publishes agent messages per
   item on some versions, so a whole answer can arrive as one large chunk.
 
-Tool/function calling, images, structured output, retries, automatic fallback,
-and persisted conversations are not yet implemented; requesting one currently
-fails with `ErrUnsupportedFeature` (see the capability matrix above).
+Tool/function calling, images, retries, automatic fallback, and persisted
+conversations are not yet implemented; requesting one currently fails with
+`ErrUnsupportedFeature` (see the capability matrix above).
 
 ## Develop
 

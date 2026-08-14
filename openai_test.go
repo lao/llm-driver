@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -127,6 +128,10 @@ func TestOpenAIGenerateMapsRequestAndResponse(t *testing.T) {
 	}
 	if captured.body["instructions"] != "Be concise." {
 		t.Fatalf("instructions = %#v", captured.body["instructions"])
+	}
+	// Backward compat: no OutputSchema => no text.format in the request body.
+	if _, ok := captured.body["text"]; ok {
+		t.Fatalf("text present without OutputSchema: %#v", captured.body["text"])
 	}
 
 	input, ok := captured.body["input"].([]any)
@@ -260,6 +265,124 @@ func TestOpenAIGeneratePreservesRefusal(t *testing.T) {
 	}
 	if result.Usage != (Usage{InputTokens: 4, OutputTokens: 6}) {
 		t.Fatalf("usage = %+v", result.Usage)
+	}
+}
+
+func TestOpenAIGenerateStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	response := `{"id":"resp_s","object":"response","status":"completed","model":"gpt-test",` +
+		`"output":[{"id":"message-1","type":"message","status":"completed","role":"assistant",` +
+		`"content":[{"type":"output_text","text":` + strconv.Quote(structuredJSON) + `,"annotations":[],"logprobs":[]}]}],` +
+		`"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{
+		Provider: ProviderOpenAI,
+		Flavor:   FlavorAPI,
+		Model:    "gpt-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	result, err := client.Generate(context.Background(), Request{
+		MaxTokens:    64,
+		Messages:     []Message{User("q")},
+		OutputSchema: &OutputSchema{Name: "answer", Schema: structuredSchema},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	// Request maps to text.format json_schema with strict:true.
+	text, ok := captured.body["text"].(map[string]any)
+	if !ok {
+		t.Fatalf("text = %#v", captured.body["text"])
+	}
+	format, ok := text["format"].(map[string]any)
+	if !ok || format["type"] != "json_schema" {
+		t.Fatalf("text.format = %#v", text["format"])
+	}
+	if format["name"] != "answer" || format["strict"] != true {
+		t.Fatalf("text.format name/strict = %#v", format)
+	}
+	if schema, ok := format["schema"].(map[string]any); !ok || schema["type"] != "object" {
+		t.Fatalf("text.format.schema = %#v", format["schema"])
+	}
+
+	if result.Text != structuredJSON {
+		t.Fatalf("Text = %q, want %q", result.Text, structuredJSON)
+	}
+	if string(result.StructuredOutput) != structuredJSON {
+		t.Fatalf("StructuredOutput = %q, want %q", result.StructuredOutput, structuredJSON)
+	}
+}
+
+func TestOpenAIGenerateStructuredOutputDefaultsName(t *testing.T) {
+	t.Parallel()
+
+	response := `{"id":"resp_s","object":"response","status":"completed","model":"gpt-test",` +
+		`"output":[{"id":"message-1","type":"message","status":"completed","role":"assistant",` +
+		`"content":[{"type":"output_text","text":` + strconv.Quote(structuredJSON) + `,"annotations":[],"logprobs":[]}]}],` +
+		`"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{
+		Provider: ProviderOpenAI,
+		Flavor:   FlavorAPI,
+		Model:    "gpt-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	// No name supplied: the openai mapping requires one, so it is defaulted.
+	if _, err := client.Generate(context.Background(), Request{
+		MaxTokens:    64,
+		Messages:     []Message{User("q")},
+		OutputSchema: &OutputSchema{Schema: structuredSchema},
+	}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	format := captured.body["text"].(map[string]any)["format"].(map[string]any)
+	if name, _ := format["name"].(string); name == "" {
+		t.Fatalf("text.format.name = %q, want a defaulted non-empty name", name)
+	}
+}
+
+func TestOpenAIGenerateStructuredOutputRejectsNonJSON(t *testing.T) {
+	t.Parallel()
+
+	response := `{"id":"resp_s","object":"response","status":"completed","model":"gpt-test",` +
+		`"output":[{"id":"message-1","type":"message","status":"completed","role":"assistant",` +
+		`"content":[{"type":"output_text","text":"not json","annotations":[],"logprobs":[]}]}],` +
+		`"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}`
+	server, _ := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{
+		Provider: ProviderOpenAI,
+		Flavor:   FlavorAPI,
+		Model:    "gpt-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	_, err = client.Generate(context.Background(), Request{
+		MaxTokens:    64,
+		Messages:     []Message{User("q")},
+		OutputSchema: &OutputSchema{Name: "answer", Schema: structuredSchema},
+	})
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("Generate() error = %T %v, want *Error", err, err)
+	}
+	if target.Operation != "generate" || target.Code != "invalid_structured_output" {
+		t.Fatalf("error = %+v, want generate/invalid_structured_output", target)
 	}
 }
 

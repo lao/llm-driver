@@ -3,6 +3,9 @@ package llmdriver
 import (
 	"context"
 	"errors"
+	"os"
+	"slices"
+	"strconv"
 	"testing"
 )
 
@@ -118,6 +121,88 @@ func TestCodexCLISuccessSelectsFinalMessageAndUsage(t *testing.T) {
 	})
 	if response.Usage != wantUsage {
 		t.Fatalf("usage = %+v, want %+v", response.Usage, wantUsage)
+	}
+}
+
+func TestCodexCLIStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	output := `{"type":"thread.started","thread_id":"t"}` + "\n" +
+		`{"type":"item.completed","item":{"id":"m","type":"agent_message","text":` + strconv.Quote(structuredJSON) + `}}` + "\n" +
+		`{"type":"turn.completed","usage":{}}` + "\n"
+
+	// The runner reads the --output-schema file while the process is "running",
+	// so the assertion proves the file exists with the schema at invocation time.
+	var schemaPath string
+	var schemaOnDisk []byte
+	run := func(_ context.Context, _ string, args []string, _ []byte) ([]byte, []byte, int, error) {
+		if i := slices.Index(args, "--output-schema"); i >= 0 && i+1 < len(args) {
+			schemaPath = args[i+1]
+			schemaOnDisk, _ = os.ReadFile(schemaPath)
+		}
+		return []byte(output), nil, 0, nil
+	}
+
+	client, err := newClient(Config{
+		Provider: ProviderOpenAI,
+		Flavor:   FlavorCLI,
+		Model:    "gpt-test",
+	}, run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	result, err := client.Generate(context.Background(), Request{
+		MaxTokens:    32,
+		Messages:     []Message{User("q")},
+		OutputSchema: &OutputSchema{Name: "answer", Schema: structuredSchema},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	if schemaPath == "" {
+		t.Fatal("codex was not invoked with --output-schema")
+	}
+	if string(schemaOnDisk) != string(structuredSchema) {
+		t.Fatalf("schema file = %q, want %q", schemaOnDisk, structuredSchema)
+	}
+	// The temp file is removed once Generate returns.
+	if _, statErr := os.Stat(schemaPath); !os.IsNotExist(statErr) {
+		t.Fatalf("schema temp file %q still exists after Generate, stat err = %v", schemaPath, statErr)
+	}
+	if result.Text != structuredJSON || string(result.StructuredOutput) != structuredJSON {
+		t.Fatalf("Text=%q StructuredOutput=%q, want %q", result.Text, result.StructuredOutput, structuredJSON)
+	}
+}
+
+func TestCodexCLIStructuredOutputRejectsNonJSON(t *testing.T) {
+	t.Parallel()
+
+	output := `{"type":"thread.started","thread_id":"t"}` + "\n" +
+		`{"type":"item.completed","item":{"id":"m","type":"agent_message","text":"not json"}}` + "\n" +
+		`{"type":"turn.completed","usage":{}}` + "\n"
+	runner := &fakeCommandRunner{stdout: []byte(output)}
+	client, err := newClient(Config{
+		Provider: ProviderOpenAI,
+		Flavor:   FlavorCLI,
+		Model:    "gpt-test",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	_, err = client.Generate(context.Background(), Request{
+		MaxTokens:    32,
+		Messages:     []Message{User("q")},
+		OutputSchema: &OutputSchema{Name: "answer", Schema: structuredSchema},
+	})
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("Generate() error = %T %v, want *Error", err, err)
+	}
+	if target.Operation != "generate" || target.Code != "invalid_structured_output" {
+		t.Fatalf("error = %+v, want generate/invalid_structured_output", target)
 	}
 }
 

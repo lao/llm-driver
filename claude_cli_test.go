@@ -3,6 +3,7 @@ package llmdriver
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 )
 
@@ -113,6 +114,67 @@ func TestClaudeCLISuccess(t *testing.T) {
 	wantUsage := Usage{InputTokens: 11, OutputTokens: 7, CachedInputTokens: 5, CacheCreationInputTokens: 3}
 	if response.Usage != wantUsage {
 		t.Fatalf("usage = %+v, want %+v", response.Usage, wantUsage)
+	}
+}
+
+func TestClaudeCLIStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{stdout: []byte(
+		`{"type":"result","subtype":"success","result":` + strconv.Quote(structuredJSON) + `,"session_id":"s"}`)}
+	client, err := newClient(Config{
+		Provider: ProviderClaude,
+		Flavor:   FlavorCLI,
+		Model:    "claude-test",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	result, err := client.Generate(context.Background(), Request{
+		MaxTokens:    32,
+		Messages:     []Message{User("q")},
+		OutputSchema: &OutputSchema{Name: "answer", Schema: structuredSchema},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	// The schema is passed inline via --json-schema.
+	runner.assertCall(t, "claude", []string{
+		"-p", "--output-format", "json", "--permission-mode", "default", "--model", "claude-test",
+		"--json-schema", string(structuredSchema),
+	}, "q")
+
+	if result.Text != structuredJSON || string(result.StructuredOutput) != structuredJSON {
+		t.Fatalf("Text=%q StructuredOutput=%q, want %q", result.Text, result.StructuredOutput, structuredJSON)
+	}
+}
+
+func TestClaudeCLIStructuredOutputRejectsNonJSON(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{stdout: []byte(`{"type":"result","subtype":"success","result":"not json","session_id":"s"}`)}
+	client, err := newClient(Config{
+		Provider: ProviderClaude,
+		Flavor:   FlavorCLI,
+		Model:    "claude-test",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	_, err = client.Generate(context.Background(), Request{
+		MaxTokens:    32,
+		Messages:     []Message{User("q")},
+		OutputSchema: &OutputSchema{Name: "answer", Schema: structuredSchema},
+	})
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("Generate() error = %T %v, want *Error", err, err)
+	}
+	if target.Operation != "generate" || target.Code != "invalid_structured_output" {
+		t.Fatalf("error = %+v, want generate/invalid_structured_output", target)
 	}
 }
 

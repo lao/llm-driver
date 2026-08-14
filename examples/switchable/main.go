@@ -95,8 +95,9 @@ func parseOptions(args []string, output io.Writer) (parsedOptions, error) {
 	prompt := flags.String("prompt", "", "text prompt to send (required)")
 	maxTokens := flags.Int("max-tokens", defaultMaxTokens, "maximum output tokens (API flavors; default 1024)")
 	stream := flags.Bool("stream", false, "print response text incrementally as it arrives")
+	schemaPath := flags.String("schema", "", "path to a JSON Schema file; constrains output to a matching JSON document")
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: switchable --provider <claude|openai> --flavor <api|cli> --model <name> --prompt <text> [--max-tokens <n>] [--stream]")
+		fmt.Fprintln(output, "Usage: switchable --provider <claude|openai> --flavor <api|cli> --model <name> --prompt <text> [--max-tokens <n>] [--stream] [--schema <file>]")
 		fmt.Fprintln(output)
 		flags.PrintDefaults()
 		fmt.Fprintln(output, "\nAuthentication:")
@@ -129,17 +130,26 @@ func parseOptions(args []string, output io.Writer) (parsedOptions, error) {
 		return parsedOptions{}, errors.New("--max-tokens must be greater than 0")
 	}
 
+	request := llmdriver.Request{
+		Messages:  []llmdriver.Message{llmdriver.User(*prompt)},
+		MaxTokens: *maxTokens,
+	}
+	if *schemaPath != "" {
+		schema, err := os.ReadFile(*schemaPath)
+		if err != nil {
+			return parsedOptions{}, fmt.Errorf("read schema file: %w", err)
+		}
+		request.OutputSchema = &llmdriver.OutputSchema{Schema: schema}
+	}
+
 	return parsedOptions{
 		config: llmdriver.Config{
 			Provider: provider,
 			Flavor:   flavor,
 			Model:    *model,
 		},
-		request: llmdriver.Request{
-			Messages:  []llmdriver.Message{llmdriver.User(*prompt)},
-			MaxTokens: *maxTokens,
-		},
-		stream: *stream,
+		request: request,
+		stream:  *stream,
 	}, nil
 }
 

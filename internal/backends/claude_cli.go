@@ -45,6 +45,7 @@ func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (
 		"--permission-mode", "default",
 		"--model", b.model,
 	}
+	args = appendClaudeSchemaArgs(args, request.OutputSchema)
 	if request.System != "" {
 		args = append(args, "--append-system-prompt", request.System)
 	}
@@ -61,7 +62,25 @@ func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (
 	if err != nil {
 		return nil, err
 	}
-	return parseClaudeCLIOutput(stdout, b.model)
+	response, err := parseClaudeCLIOutput(stdout, b.model)
+	if err != nil {
+		return nil, err
+	}
+	if err := setStructuredOutput(response, request.OutputSchema, core.ProviderClaude, core.FlavorCLI, "generate"); err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
+// appendClaudeSchemaArgs passes the JSON Schema inline via --json-schema. The
+// pinned CLI accepts inline JSON (asserted by the opt-in integration smoke). If
+// a future CLI version rejects inline JSON, write the schema to a 0600 temp file
+// like the Codex adapter does and pass its path instead, and update SPEC.
+func appendClaudeSchemaArgs(args []string, schema *core.OutputSchema) []string {
+	if schema == nil {
+		return args
+	}
+	return append(args, "--json-schema", string(compactSchema(schema)))
 }
 
 // GenerateStream builds the same transcript and system flags as the batch path
@@ -77,6 +96,7 @@ func (b *claudeCLIBackend) GenerateStream(ctx context.Context, request core.Requ
 		"--permission-mode", "default",
 		"--model", b.model,
 	}
+	args = appendClaudeSchemaArgs(args, request.OutputSchema)
 	if request.System != "" {
 		args = append(args, "--append-system-prompt", request.System)
 	}
@@ -93,7 +113,7 @@ func (b *claudeCLIBackend) GenerateStream(ctx context.Context, request core.Requ
 	if err != nil {
 		return nil, err
 	}
-	return newCLIChunkStream(core.ProviderClaude, process, &claudeCLIStreamParser{model: b.model}), nil
+	return newCLIChunkStream(core.ProviderClaude, process, &claudeCLIStreamParser{model: b.model, schema: request.OutputSchema}), nil
 }
 
 // claudeCLIStreamLine is the stream-json envelope: partial-message lines carry
@@ -111,6 +131,7 @@ type claudeCLIStreamLine struct {
 
 type claudeCLIStreamParser struct {
 	model  string
+	schema *core.OutputSchema
 	result *core.Response
 }
 
@@ -132,6 +153,11 @@ func (p *claudeCLIStreamParser) event(line []byte) (string, error) {
 		}
 		response, err := claudeCLIResponse(result, p.model, "generate_stream")
 		if err != nil {
+			return "", err
+		}
+		// The result line carries the full text, which matches the concatenated
+		// deltas the root Stream reports, so StructuredOutput uses the same bytes.
+		if err := setStructuredOutput(response, p.schema, core.ProviderClaude, core.FlavorCLI, "generate_stream"); err != nil {
 			return "", err
 		}
 		p.result = response
