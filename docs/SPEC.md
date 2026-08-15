@@ -1,161 +1,152 @@
-# Spec: llm-driver streaming support
+# Spec: llm-driver SDK generation parity
+
+Supersedes the streaming spec (shipped; see git history of this file).
 
 ## Objective
 
-Add streaming text generation to `llm-driver` so a caller can consume
-incremental text deltas — and then the same normalized final `Response` that
-`Generate` returns — from any of the four existing targets without changing
-call sites when the target changes:
+Bring `llm-driver` to feature parity with the official SDKs' *generation*
+surface — the capabilities of a single `messages.create` (Anthropic) /
+`responses.create` (OpenAI) call — across all four existing targets, without
+breaking the current public API.
 
-| Provider | Flavor | Streaming transport |
-| --- | --- | --- |
-| `claude` | `api` | Anthropic Messages streaming (SSE) via the official Go SDK |
-| `claude` | `cli` | `claude -p --output-format stream-json --include-partial-messages` |
-| `openai` | `api` | OpenAI Responses streaming (SSE) via the official Go SDK |
-| `openai` | `cli` | `codex exec --json` JSONL events read incrementally |
+Scope decision (approved): **generation parity only.** Platform APIs that a
+CLI can never serve (embeddings, batches, files CRUD, audio, images
+generation, fine-tuning, vector stores, admin) are permanently out of scope.
 
-The primary user is the same Go developer as the base library: they prototype
-against a locally authenticated CLI, then switch `Config` to a hosted API. A
-streaming call written once must work against all four targets; only chunk
-granularity may differ, and that difference is documented, not hidden.
+The user is the same Go developer as today: write a call once, switch
+`Config` between the four targets. New rule for the expanded surface: when a
+target cannot honor a requested feature, the library **fails loudly** — it
+never silently degrades.
 
-The base non-streaming API (`New`, `Generate`, `Request`, `Response`, `Error`)
-is stable and must not change shape or behavior.
+### Parity inventory and target support
 
-The public types now live in `internal/core` with root-package aliases keeping
-the API surface unchanged. The committed module path is
-`github.com/lao/llm-driver`; no compatibility package or deprecated aliases for
-the former path are included.
+Feature set = union of the two SDKs' generation parameters, normalized to
+provider-neutral types. Support per target ("bridge" = mapped through a CLI
+flag; "✗" = `ErrUnsupportedFeature`):
 
-### Public API additions
+| Feature | claude/api | openai/api | claude/cli | codex/cli |
+| --- | --- | --- | --- | --- |
+| System, messages, MaxTokens, streaming | ✓ (today) | ✓ (today) | ✓ (today) | ✓ (today) |
+| Structured output (JSON schema) | ✓ `output_config.format` | ✓ `text.format` json_schema strict | ✓ `--json-schema` | ✓ `--output-schema` |
+| Reasoning effort | ✓ `output_config.effort` | ✓ `reasoning.effort` | ✓ `--effort` | ✓ `-c model_reasoning_effort` |
+| Reasoning/thinking visibility | ✓ thinking config | ✓ `reasoning.summary` | ✗ | ✗ |
+| Tool calling (caller-executed) | ✓ tools + tool_choice | ✓ tools + tool_choice | ✗ (MCP bridge = stretch) | ✗ |
+| Image input | ✓ content blocks | ✓ `input_image` | ✗ | ✓ `--image` |
+| PDF/document input | ✓ document blocks | ✓ `input_file` | ✗ | ✗ |
+| Temperature / TopP / TopK | pass-through¹ | pass-through¹ (no TopK) | ✗ | ✗ |
+| Stop sequences | ✓ | ✗ (absent from Responses API) | ✗ | ✗ |
+| Web search (provider-executed) | ✓ server tool | ✓ built-in tool | ✓ `--allowedTools WebSearch` | ✓ `--search` |
+| Metadata / end-user ID | ✓ `metadata.user_id` | ✓ `safety_identifier` | ✗ | ✗ |
+| Conversation continuation by ID | ✗² | ✓ `previous_response_id` | ✓ `--resume` | ✗ (resume is a separate subcommand) |
+| Token counting | ✓ `count_tokens` | ✗ | ✗ | ✗ |
+| Retries, timeouts | library-level, all four targets | | | |
 
-The library keeps owning all public types. Neither provider SDK leaks through
-the boundary. The streaming surface mirrors both official SDKs' iterator style:
+¹ Providers are moving away from sampling params (Anthropic rejects them on
+newest models; OpenAI ignores them on reasoning models). The library passes
+them through and surfaces provider rejections as normalized errors; it does
+not maintain a model→param compatibility table.
+² Anthropic conversations are already expressible via the `Messages`
+transcript; no ID-based continuation exists in the Messages API.
 
-```go
-stream, err := client.GenerateStream(ctx, llmdriver.Request{
-	System:    "Answer concisely.",
-	MaxTokens: 1024,
-	Messages:  []llmdriver.Message{llmdriver.User("Hello")},
-})
-if err != nil {
-	return err
-}
-defer stream.Close()
+### Public API additions (shape, exact names settled per phase)
 
-for stream.Next() {
-	fmt.Print(stream.Current().Text)
-}
-
-response, err := stream.Response()
-if err != nil {
-	return err
-}
-fmt.Println(response.Usage.OutputTokens)
-```
-
-New public surface (exact, deliberately small):
+All types stay provider-neutral in `internal/core` with root aliases, as
+today. Additions are strictly backward compatible — existing fields and
+methods keep byte-for-byte behavior.
 
 ```go
-// GenerateStream validates the request and starts one streaming generation.
-func (c *Client) GenerateStream(context.Context, Request) (*Stream, error)
+// Capability query — answers "will this target accept this request feature?"
+type Feature string // FeatureStructuredOutput, FeatureTools, FeatureImageInput, ...
+func (c *Client) Supports(Feature) bool
 
-// Chunk is one incremental piece of response text.
-type Chunk struct {
-	Text string
+// New sentinel: requested feature not available on the selected target.
+var ErrUnsupportedFeature error
+
+// Request grows optional fields (zero value = today's behavior):
+type Request struct {
+    // existing: System, Messages, MaxTokens
+    Effort          Effort          // "", low, medium, high, xhigh, max (normalized)
+    OutputSchema    *OutputSchema   // name + JSON Schema (json.RawMessage)
+    Tools           []Tool          // name, description, JSON Schema input
+    ToolChoice      ToolChoice      // auto (default) / none / required / named
+    WebSearch       *WebSearchOption
+    Temperature     *float64
+    TopP            *float64
+    TopK            *int
+    StopSequences   []string
+    UserID          string          // abuse-tracking end-user id
+    ContinueFrom    string          // provider response / CLI session id
 }
 
-// Stream iterates text chunks and terminates in a normalized Response.
-type Stream struct{ /* unexported */ }
+// Message grows content parts; Text stays as the text-only fast path.
+type Message struct {
+    Role  Role
+    Text  string  // exactly one of Text / Parts
+    Parts []Part  // TextPart, ImagePart (bytes+media type or path), DocumentPart
+}
 
-func (s *Stream) Next() bool             // advance; false at end or on error
-func (s *Stream) Current() Chunk         // valid after Next() returned true
-func (s *Stream) Err() error             // terminal stream error, if any
-func (s *Stream) Response() (*Response, error) // final accumulated response
-func (s *Stream) Close() error           // release resources; idempotent, safe concurrently with Next
+// Response grows:
+type Response struct {
+    // existing fields unchanged
+    ToolCalls  []ToolCall      // id, name, raw JSON input
+    StructuredOutput json.RawMessage // present when OutputSchema was set
+}
+// New CompletionReasonToolUse. Caller loops by appending ToolResult
+// messages (helper: llmdriver.ToolResult(id, content, isErr)).
+
+// Streaming: Chunk gains a Kind (default KindText, existing behavior);
+// KindThinking and KindToolInput deltas are additive.
+
+// Config grows: MaxRetries *int, Timeout time.Duration (library-level
+// retry/backoff for CLI flavors; mapped to SDK options for API flavors).
 ```
 
 Contract:
 
-- `GenerateStream` performs the same `Request` validation as `Generate` and
-  returns the same normalized `*Error` values for invalid requests and
-  startup failures (bad config pairs are impossible past `New`).
-- `Next`/`Current`/`Err` follow the standard Go iterator idiom (as in both
-  official SDKs and `bufio.Scanner`): `Next` returns false at normal end or
-  on error; `Err` distinguishes the two. `Chunk.Text` is never empty.
-- `Response()` returns the same fields `Generate` would have produced: text
-  equal to the concatenation of all yielded chunks, plus model, usage,
-  completion reason, ID, provider, and flavor as reported by the target.
-  Calling it before the stream is exhausted returns a normalized `*Error`;
-  after a stream error it returns that error.
-- `Close()` aborts an in-flight stream (terminating a CLI subprocess or the
-  HTTP response body), is idempotent, and never panics. A stream abandoned
-  after `Close` without exhaustion leaves no goroutine or process behind.
-- Context cancellation terminates the stream; `Err()` then reports a
-  normalized error wrapping `context.Canceled`/`DeadlineExceeded`.
-- Mid-stream provider failures (SSE error event, CLI `turn.failed`, nonzero
-  exit, malformed output) surface through `Err()`/`Response()` as the same
-  normalized `*Error` shape used by `Generate`, including provider, flavor,
-  operation `"generate_stream"`, and status/code when available.
-- `Generate` behavior is byte-for-byte unchanged.
+- `Generate`/`GenerateStream` validate the request against the selected
+  target's capability table **before** invocation; unsupported features
+  return `ErrUnsupportedFeature` naming the feature and target. No silent
+  drops, ever.
+- A request using only today's fields behaves identically to today.
+- Provider SDK types still never leak through the public API.
 
-### Per-target semantics
+## Roadmap (phased, ~1 PR each, dependency-ordered)
 
-- **Anthropic API**: SDK Messages streaming; chunks from `text_delta` events;
-  usage/stop reason accumulated from message start/delta events.
-- **OpenAI API**: SDK Responses streaming; chunks from output-text delta
-  events; usage/ID/completion state from the completed-response event.
-- **Claude CLI**: `-p --output-format stream-json --include-partial-messages
-  --verbose` (stream-json requires verbose in print mode); chunks from
-  `stream_event` content-block text deltas; final `result` event supplies
-  usage, session ID, and error results exactly as the batch parser does.
-- **Codex CLI**: `exec --json` events parsed line-by-line as the process
-  writes them; chunks from agent-message items (delta events when the
-  installed CLI emits them, otherwise per completed item). Usage and thread
-  ID from `turn.completed`/`thread.started`.
+1. **Capability framework** — `Feature`, `Supports`, `ErrUnsupportedFeature`,
+   per-target validation table, README capability matrix. Everything else
+   hangs off this.
+2. **Structured output** — all four targets. `OutputSchema` in,
+   `StructuredOutput` out; CLI flag mapping (`--json-schema`,
+   `--output-schema` temp file); malformed-output error path.
+3. **Reasoning effort + richer results** — `Effort` on all four targets;
+   expanded `CompletionReason` values (tool_use, content_filter) and `Usage`
+   passthrough already-normalized fields where targets report them.
+4. **Sampling params** — `Temperature`, `TopP`, `TopK`, `StopSequences`,
+   `UserID`; API flavors only, pass-through semantics (note ¹ above).
+5. **Tool calling** — API flavors: `Tools`, `ToolChoice`, parallel calls,
+   `ToolCalls`/`ToolResult` round-trip, streaming `KindToolInput` deltas.
+   CLI flavors: `ErrUnsupportedFeature`.
+6. **Multimodal input** — `Parts` with images (claude/api, openai/api,
+   codex/cli via `--image` temp file) and PDFs (API flavors).
+7. **Client robustness** — `MaxRetries`/`Timeout` on `Config`, uniform
+   backoff for CLI flavors, mapped to SDK retry options for API flavors;
+   request IDs on `Error` where available.
+8. **Conversation continuation** — `ContinueFrom` (openai/api
+   `previous_response_id`, claude/cli `--resume`); `Response.ID` already
+   supplies the handle.
+9. **Web search** — provider-executed search on all four targets, opt-in.
+10. **Stretch (separate approval each):** Claude CLI tool bridge via an
+    in-process MCP server; token counting (`claude/api` only); prompt-cache
+    control knobs.
 
-Chunk granularity is target-defined: hosted APIs and Claude CLI produce
-token-ish deltas; Codex CLI may produce few, large chunks. The README states
-this as a semantic difference of the CLI flavors, like `MaxTokens`.
-
-CLI streaming requires reading stdout incrementally, so the existing batch
-`commandRunner` is complemented by a streaming runner in `backend_cli.go`
-that exposes the subprocess stdout as an `io.ReadCloser` with the same
-safety properties as today: argv built directly, prompt on stdin, no shell,
-bounded line sizes, process-group termination on cancel/close, `WaitDelay`.
-Fake streaming runners keep default tests offline.
-
-### Scope
-
-In scope:
-
-- Streaming text-only generation on all four provider/flavor targets.
-- The `Stream`/`Chunk` public API above; final accumulated `Response` parity
-  with `Generate`.
-- Streaming-capable process running for CLI targets with clean cancellation
-  and no zombie processes.
-- Normalized mid-stream and startup errors.
-- A `--stream` flag on `examples/switchable` printing chunks as they arrive.
-- README and package documentation updates (streaming moves from the
-  out-of-scope list to a documented feature with honest CLI caveats).
-
-Out of scope for this PR:
-
-- Tool/function calling, images, structured output, retries, fallback,
-  conversation persistence (unchanged from base spec).
-- Streaming usage/heartbeat metadata beyond the final `Response`.
-- Changing the non-streaming path, module path, or CI workflows.
-- New dependencies: only Go stdlib plus the already-pinned SDKs.
+Phases 1–5 are the committed core. 6–9 land in priority order after. 10 is
+not committed by this spec.
 
 ## Tech Stack
 
-- Go 1.24 (current `go.mod`).
-- `github.com/anthropics/anthropic-sdk-go` v1.58.1 — `Messages.NewStreaming`
-  and its `ssestream` package (already a dependency).
-- `github.com/openai/openai-go/v3` v3.44.0 — `Responses.NewStreaming`
-  (already a dependency).
-- Go standard library (`os/exec`, `bufio`, `encoding/json`, `iter` not
-  required) for CLI streaming and tests. No new dependencies.
+Unchanged: Go 1.24, `anthropic-sdk-go` (pinned), `openai-go/v3` (pinned),
+stdlib only otherwise. SDK version bumps allowed when a phase needs a newer
+parameter surface; no other new dependencies without approval.
 
 ## Commands
 
@@ -166,123 +157,86 @@ go build ./...
 go vet ./...
 go test ./...
 go test -race ./...
-go test -cover ./...
 go build ./examples/switchable
 
-# Streaming example: local Claude CLI
-go run ./examples/switchable \
-  --provider claude --flavor cli --model claude-sonnet-4-5 \
-  --stream --prompt "Explain dependency inversion in one paragraph"
+# Opt-in real-binary smoke test (unchanged mechanism)
+LLM_DRIVER_CLAUDE_CLI_MODEL=... LLM_DRIVER_CODEX_CLI_MODEL=... \
+  go test -tags integration -run 'CLIIntegration' .
 ```
 
-Default tests must not contact a real provider or start a real agent CLI.
+Default tests stay offline: httptest servers + fake process runners.
 
 ## Project Structure
 
-New/changed files only; everything else is untouched:
+Unchanged layout. Each phase touches its adapter files plus:
 
 ```text
-go.mod / go.sum                 module metadata and pinned SDKs
-doc.go                          package documentation and short example
-client.go                       Client, New, target selection, Generate
-stream.go                       Stream, GenerateStream, accumulation plumbing
-llmdriver.go                   public aliases for the internal/core types (incl. Chunk)
-*_test.go                       contract and adapter tests via the public API
-stream_test.go                  Stream contract and accumulation tests
-internal/core/config.go         Config and provider/flavor validation
-internal/core/types.go          neutral request, response, message, usage, chunk types
-internal/core/errors.go         normalized Error and sentinel errors
-internal/core/backend.go        Backend interface, ChunkStream, CommandRunner
-internal/backends/build.go      backend construction from a Config
-internal/backends/anthropic.go  Claude API adapter (+ Messages streaming)
-internal/backends/openai.go     OpenAI Responses API adapter (+ Responses streaming)
-internal/backends/claude_cli.go Claude CLI adapter (+ stream-json parser)
-internal/backends/codex_cli.go  Codex CLI adapter and JSONL parser (+ streaming)
-internal/backends/cli.go        shared safe process runner, streaming subprocess runner
-examples/switchable/main.go     provider/flavor/model example (+ --stream flag)
-README.md                       install, quick start, matrix, limitations
-docs/SPEC.md                    this approved source of truth
-docs/tasks/plan.md              approved implementation plan
-docs/tasks/todo.md              dependency-ordered task checklist
+internal/core/capabilities.go    per-target feature table (new, phase 1)
+internal/core/types.go           Request/Response/Part/Tool growth
+internal/backends/*.go           per-target mapping of each feature
+docs/SPEC.md                     this spec (living document)
+docs/tasks/                      per-phase plan + todo, as today
 ```
-
-The root package holds the public API and re-exports the neutral types from
-internal/core, which internal/backends shares without an import cycle.
-Provider SDK imports are confined to their corresponding adapter files.
 
 ## Code Style
 
-Unchanged from the base spec: idiomatic Go, explicit validation, short
-functions, direct code over single-caller abstractions, documented exports,
-`gofmt` authoritative. Streaming-specific additions:
+Unchanged from prior specs: idiomatic Go, explicit validation, documented
+exports, `gofmt` authoritative, no single-caller abstractions. Additions:
 
-- One shared chunk-accumulator used by all four adapters so `Response`
-  parity with `Generate` is written once.
-- No goroutine leaks: every goroutine started by a stream exits on `Close`,
-  context cancellation, or exhaustion; verify with `-race` tests.
-- Wrap operational failures exactly as `Generate` does, with operation
-  `"generate_stream"`.
+- Capability checks live in one table, not scattered `if flavor ==` checks.
+- Feature mapping code sits in the owning adapter file; shared normalization
+  (e.g. tool-call accumulation) written once in `internal/core` or a shared
+  backend helper.
 
 ## Testing Strategy
 
-Beside the implementation, `testing` package only:
+`testing` package only, offline by default, per phase:
 
-1. Stream contract tests: chunk order, `Current` stability, `Err` vs normal
-   end, `Response` before exhaustion, `Response` text == concatenated chunks,
-   double `Close`, `Close` mid-stream, context cancellation.
-2. Anthropic/OpenAI adapter tests: `httptest.Server` emitting SSE fixtures
-   through the SDK base-URL override — happy path, usage mapping, mid-stream
-   error events, malformed SSE, HTTP-level errors.
-3. Claude CLI streaming tests: fake streaming runner emitting stream-json
-   lines incrementally — deltas, final result mapping, error results,
-   malformed lines, early process exit, argv assertion (including
-   `--include-partial-messages`).
-4. Codex CLI streaming tests: fake streaming runner emitting JSONL — item
-   deltas/completions, `turn.failed`, `error`, missing completion, oversized
-   lines, argv assertion.
-5. Contract suite: the same streaming request through all four adapters
-   asserts identical normalized chunk/response shape.
-6. Process hygiene: fake and real (`os/exec` with a helper binary or `sh`-free
-   equivalent) tests proving Close/cancel terminates the subprocess and no
-   goroutines leak (`-race`, goroutine-count guard).
-7. Example compiles; README commands stay accurate.
-
-Meaningful error-path coverage is required; happy-path-only coverage is not
-acceptance.
+- Contract tests: same request through every *supporting* target asserts one
+  normalized result shape; every *non-supporting* target asserts
+  `ErrUnsupportedFeature` (table-driven off the capability table, so docs,
+  validation, and tests cannot drift apart).
+- Adapter tests: request-mapping assertions (SDK request JSON / CLI argv) +
+  response parsing from fixtures, happy path and error paths.
+- Streaming tests for every phase touching stream shape (tool deltas,
+  structured output accumulation).
+- Process hygiene and `-race` guarantees maintained for CLI changes.
+- Opt-in integration smoke extends to new CLI flags (`--json-schema`,
+  `--output-schema`, `--effort`, `--image`, `--search`, `--resume`).
 
 ## Boundaries
 
-- **Always:** validate public inputs; keep public types provider-neutral;
-  keep default tests offline/deterministic; prompts via stdin, never a shell;
-  keep `Generate` behavior unchanged; run the full verification suite before
-  commits and the PR; update this spec if a decision changes.
-- **Ask first:** new dependencies; changing the batch `commandRunner`
-  contract; adding streaming beyond text deltas; touching CI files; real
-  billable API/CLI calls.
-- **Never:** commit credentials; leak provider SDK types publicly; leave
-  orphan subprocesses/goroutines; remove failing tests to go green; break
-  the existing public API.
+- **Always:** validate before invoking targets; fail loudly on unsupported
+  features; keep public types provider-neutral; keep default tests offline;
+  prompts/schemas via stdin or temp files, never shell interpolation; keep
+  existing behavior for existing requests; update this spec when a decision
+  changes.
+- **Ask first:** SDK version bumps; any new dependency; anything in the
+  stretch list; widening CLI subprocess permissions (e.g. enabling tools or
+  search changes what the CLI may do locally); CI changes.
+- **Never:** silent feature degradation; leaking SDK types; committing
+  credentials; orphan subprocesses; removing failing tests; breaking the
+  existing public API.
 
 ## Success Criteria
 
-- One unchanged `GenerateStream` loop works against all four targets when
-  only `Config` changes.
-- `stream.Response()` equals what `Generate` would report (text, usage,
-  completion reason, IDs) for the same underlying provider output.
-- Anthropic uses Messages streaming; OpenAI uses Responses streaming; Claude
-  CLI uses stream-json with partial messages; Codex CLI parses JSONL
-  incrementally — all verified by offline tests.
-- Close/cancel terminates CLI subprocesses and leaks no goroutines under
-  `-race`.
-- `examples/switchable --stream` prints incrementally and compiles in CI-less
-  local verification.
-- `gofmt`, `go build`, `go vet`, `go test`, `go test -race` all pass
-  offline.
-- Spec, plan, implementation, tests, and docs land on a feature branch with
-  a GitHub PR against `main`.
+- Every feature in the parity inventory is either implemented on a target or
+  deliberately rejected with `ErrUnsupportedFeature` — no third state.
+- `Supports` answers agree exactly with runtime behavior (enforced by the
+  table-driven contract tests).
+- A request using only pre-parity fields produces byte-identical behavior on
+  all four targets.
+- Each phase lands green (`gofmt`, build, vet, test, `-race`) as its own PR
+  with README capability-matrix updates.
+- Phases 1–5 complete = "core parity done"; 6–9 complete = spec objective met.
 
 ## Open Questions
 
-None blocking. Codex CLI delta-event support varies by installed version;
-the parser accepts both delta events and whole-item completion, and the
-integration smoke test (opt-in, as today) validates real-binary flags.
+1. Claude CLI `--json-schema`: verify the flag accepts inline JSON at the
+   pinned CLI version during phase 2 (integration smoke will catch drift).
+2. Codex `exec resume` ergonomics are awkward (separate subcommand); phase 8
+   may add codex support later if the CLI grows an inline flag — spec marks
+   it ✗ for now.
+3. Whether `StructuredOutput` should also re-expose as `Text` (both, per
+   current draft: `Text` keeps raw text, `StructuredOutput` the parsed raw
+   JSON) — settle in phase 2 review.
