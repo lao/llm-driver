@@ -397,7 +397,7 @@ func TestAnthropicGenerateToolRoundTrip(t *testing.T) {
 		t.Fatalf("New(): %v", err)
 	}
 
-	weatherSchema := json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}}}`)
+	weatherSchema := json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`)
 	result, err := client.Generate(context.Background(), Request{
 		MaxTokens:  64,
 		Messages:   []Message{User("weather and time?")},
@@ -417,8 +417,23 @@ func TestAnthropicGenerateToolRoundTrip(t *testing.T) {
 	if tool0["name"] != "get_weather" || tool0["description"] != "weather by city" {
 		t.Fatalf("tools[0] = %#v", tool0)
 	}
-	if schema, ok := tool0["input_schema"].(map[string]any); !ok || schema["type"] != "object" {
+	schema, ok := tool0["input_schema"].(map[string]any)
+	if !ok || schema["type"] != "object" {
 		t.Fatalf("tools[0].input_schema = %#v", tool0["input_schema"])
+	}
+	// The schema must survive the SDK round-trip with full fidelity: keywords
+	// beyond "type" (nested "properties" and top-level "required") must not be
+	// silently dropped when mapping through the typed input-schema param.
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools[0].input_schema.properties = %#v", schema["properties"])
+	}
+	if city, ok := properties["city"].(map[string]any); !ok || city["type"] != "string" {
+		t.Fatalf("tools[0].input_schema.properties.city = %#v", properties["city"])
+	}
+	required, ok := schema["required"].([]any)
+	if !ok || len(required) != 1 || required[0] != "city" {
+		t.Fatalf("tools[0].input_schema.required = %#v", schema["required"])
 	}
 	if choice, ok := captured.body["tool_choice"].(map[string]any); !ok || choice["type"] != "any" {
 		t.Fatalf("tool_choice = %#v", captured.body["tool_choice"])
