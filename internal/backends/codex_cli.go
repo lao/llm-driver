@@ -58,7 +58,7 @@ func newCodexCLIBackend(config cliBackendConfig) *codexCLIBackend {
 // cli_integration_test.go launches the real binary to surface flag drift
 // against the installed `codex` version.
 func (b *codexCLIBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
-	args, cleanup, err := b.commandArgs(request)
+	args, cleanup, err := b.commandArgs(request, "generate")
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (b *codexCLIBackend) Generate(ctx context.Context, request core.Request) (*
 // process has exited. When a schema is requested it is written to a 0600 temp
 // file passed via --output-schema, and cleanup removes that file; otherwise
 // cleanup is a no-op. Cleanup is idempotent.
-func (b *codexCLIBackend) commandArgs(request core.Request) ([]string, func(), error) {
+func (b *codexCLIBackend) commandArgs(request core.Request, operation string) ([]string, func(), error) {
 	args := []string{
 		"exec",
 		"--json",
@@ -111,7 +111,7 @@ func (b *codexCLIBackend) commandArgs(request core.Request) ([]string, func(), e
 	}
 	cleanup := func() {}
 	if request.OutputSchema != nil {
-		path, remove, err := writeSchemaFile(request.OutputSchema)
+		path, remove, err := writeSchemaFile(request.OutputSchema, operation)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -125,20 +125,20 @@ func (b *codexCLIBackend) commandArgs(request core.Request) ([]string, func(), e
 // writeSchemaFile writes the schema to a 0600 temp file (os.CreateTemp's default
 // mode) and returns its path plus an idempotent remover. A partial file is
 // removed before returning an error, so no path leaks on the failure path.
-func writeSchemaFile(schema *core.OutputSchema) (string, func(), error) {
+func writeSchemaFile(schema *core.OutputSchema, operation string) (string, func(), error) {
 	file, err := os.CreateTemp(schemaTempDir, "llmdriver-schema-*.json")
 	if err != nil {
-		return "", nil, codexCLIParseError("generate", fmt.Errorf("create schema temp file: %w", err))
+		return "", nil, codexCLIParseError(operation, fmt.Errorf("create schema temp file: %w", err))
 	}
 	remove := sync.OnceFunc(func() { _ = os.Remove(file.Name()) })
 	if _, err := file.Write(compactSchema(schema)); err != nil {
 		_ = file.Close()
 		remove()
-		return "", nil, codexCLIParseError("generate", fmt.Errorf("write schema temp file: %w", err))
+		return "", nil, codexCLIParseError(operation, fmt.Errorf("write schema temp file: %w", err))
 	}
 	if err := file.Close(); err != nil {
 		remove()
-		return "", nil, codexCLIParseError("generate", fmt.Errorf("close schema temp file: %w", err))
+		return "", nil, codexCLIParseError(operation, fmt.Errorf("close schema temp file: %w", err))
 	}
 	return file.Name(), remove, nil
 }
@@ -159,7 +159,7 @@ func (p *cleanupProcess) close() error {
 // GenerateStream reuses the batch invocation and parses the same JSONL events
 // as they arrive instead of after the process exits.
 func (b *codexCLIBackend) GenerateStream(ctx context.Context, request core.Request) (core.ChunkStream, error) {
-	args, cleanup, err := b.commandArgs(request)
+	args, cleanup, err := b.commandArgs(request, "generate_stream")
 	if err != nil {
 		return nil, err
 	}
