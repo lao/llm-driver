@@ -127,6 +127,18 @@ func runCLIIntegrationSmoke(t *testing.T, provider Provider, binary, modelEnv st
 	if !json.Valid(schemaResponse.StructuredOutput) {
 		t.Fatalf("%s CLI structured output is not valid JSON: %q", binary, schemaResponse.StructuredOutput)
 	}
+
+	// Reasoning effort adds --effort (claude) / -c model_reasoning_effort
+	// (codex). A live call surfaces flag drift here rather than at runtime.
+	effortRequest := request
+	effortRequest.Effort = EffortLow
+	effortResponse, err := client.Generate(ctx, effortRequest)
+	if err != nil {
+		reportCLIFailure(t, binary, "Generate(effort)", err)
+	}
+	if strings.TrimSpace(effortResponse.Text) == "" {
+		t.Fatalf("%s CLI returned empty text with effort", binary)
+	}
 }
 
 func reportCLIFailure(t *testing.T, binary, operation string, err error) {

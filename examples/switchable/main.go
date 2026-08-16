@@ -96,8 +96,9 @@ func parseOptions(args []string, output io.Writer) (parsedOptions, error) {
 	maxTokens := flags.Int("max-tokens", defaultMaxTokens, "maximum output tokens (API flavors; default 1024)")
 	stream := flags.Bool("stream", false, "print response text incrementally as it arrives")
 	schemaPath := flags.String("schema", "", "path to a JSON Schema file; constrains output to a matching JSON document")
+	effort := flags.String("effort", "", "reasoning effort: low, medium, high, xhigh, or max (openai/api tops out at high)")
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: switchable --provider <claude|openai> --flavor <api|cli> --model <name> --prompt <text> [--max-tokens <n>] [--stream] [--schema <file>]")
+		fmt.Fprintln(output, "Usage: switchable --provider <claude|openai> --flavor <api|cli> --model <name> --prompt <text> [--max-tokens <n>] [--stream] [--schema <file>] [--effort <level>]")
 		fmt.Fprintln(output)
 		flags.PrintDefaults()
 		fmt.Fprintln(output, "\nAuthentication:")
@@ -140,6 +141,11 @@ func parseOptions(args []string, output io.Writer) (parsedOptions, error) {
 			return parsedOptions{}, fmt.Errorf("read schema file: %w", err)
 		}
 		request.OutputSchema = &llmdriver.OutputSchema{Schema: schema}
+	}
+	if *effort != "" {
+		// Pass the value straight through; the client validates it against the
+		// selected target and rejects an unsupported level with ErrUnsupportedFeature.
+		request.Effort = llmdriver.Effort(*effort)
 	}
 
 	return parsedOptions{

@@ -89,6 +89,10 @@ func (b *openAIBackend) params(request core.Request) responses.ResponseNewParams
 	if request.System != "" {
 		params.Instructions = openai.String(request.System)
 	}
+	if request.Effort != "" {
+		// Core validated the value against the target's allowed set (low..high).
+		params.Reasoning = openai.ReasoningParam{Effort: openai.ReasoningEffort(request.Effort)}
+	}
 	if request.OutputSchema != nil {
 		// Validated in core, so SchemaObject cannot fail here.
 		schema, _ := request.OutputSchema.SchemaObject()
@@ -191,10 +195,14 @@ func openAIResponse(response *responses.Response) *core.Response {
 }
 
 func validateOpenAIResponse(response *responses.Response, operation string) error {
-	if response.Status == responses.ResponseStatusIncomplete &&
-		response.IncompleteDetails.Reason == "max_output_tokens" &&
-		response.Error.Code == "" {
-		return nil
+	// An incomplete response that stopped for a reason the library maps to a
+	// CompletionReason (output-token limit or content filter) is a normal result
+	// carrying partial text, not an error.
+	if response.Status == responses.ResponseStatusIncomplete && response.Error.Code == "" {
+		switch response.IncompleteDetails.Reason {
+		case "max_output_tokens", "content_filter":
+			return nil
+		}
 	}
 	if response.Status != responses.ResponseStatusCompleted {
 		code := string(response.Status)
@@ -237,9 +245,13 @@ func openAIResponseText(response *responses.Response) string {
 }
 
 func openAICompletionReason(response *responses.Response) core.CompletionReason {
-	if response.Status == responses.ResponseStatusIncomplete &&
-		response.IncompleteDetails.Reason == "max_output_tokens" {
-		return core.CompletionReasonMaxTokens
+	if response.Status == responses.ResponseStatusIncomplete {
+		switch response.IncompleteDetails.Reason {
+		case "max_output_tokens":
+			return core.CompletionReasonMaxTokens
+		case "content_filter":
+			return core.CompletionReasonContentFilter
+		}
 	}
 	for _, item := range response.Output {
 		for _, content := range item.Content {

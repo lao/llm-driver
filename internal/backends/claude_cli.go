@@ -46,6 +46,7 @@ func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (
 		"--model", b.model,
 	}
 	args = appendClaudeSchemaArgs(args, request.OutputSchema)
+	args = appendClaudeEffortArgs(args, request.Effort)
 	if request.System != "" {
 		args = append(args, "--append-system-prompt", request.System)
 	}
@@ -83,6 +84,16 @@ func appendClaudeSchemaArgs(args []string, schema *core.OutputSchema) []string {
 	return append(args, "--json-schema", string(compactSchema(schema)))
 }
 
+// appendClaudeEffortArgs passes the reasoning-effort level via --effort. The
+// pinned CLI accepts low, medium, high, xhigh, and max; core validated the value
+// against that set before the adapter is reached.
+func appendClaudeEffortArgs(args []string, effort core.Effort) []string {
+	if effort == "" {
+		return args
+	}
+	return append(args, "--effort", string(effort))
+}
+
 // GenerateStream builds the same transcript and system flags as the batch path
 // but asks for incremental stream-json output. Print mode requires --verbose for
 // stream-json, and --include-partial-messages adds the raw Anthropic SSE
@@ -97,6 +108,7 @@ func (b *claudeCLIBackend) GenerateStream(ctx context.Context, request core.Requ
 		"--model", b.model,
 	}
 	args = appendClaudeSchemaArgs(args, request.OutputSchema)
+	args = appendClaudeEffortArgs(args, request.Effort)
 	if request.System != "" {
 		args = append(args, "--append-system-prompt", request.System)
 	}

@@ -109,6 +109,10 @@ func (b *codexCLIBackend) commandArgs(request core.Request, operation string) ([
 	if request.System != "" {
 		args = append(args, "--config", codexDeveloperInstructions(request.System))
 	}
+	if request.Effort != "" {
+		// Core validated the value; Codex forwards the config to the model.
+		args = append(args, "-c", "model_reasoning_effort="+string(request.Effort))
+	}
 	cleanup := func() {}
 	if request.OutputSchema != nil {
 		path, remove, err := writeSchemaFile(request.OutputSchema, operation)

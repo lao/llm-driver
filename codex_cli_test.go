@@ -54,6 +54,21 @@ func TestCodexCLICommand(t *testing.T) {
 			},
 			wantPrompt: "User: First\n\nAssistant: Second\n\nUser: Third",
 		},
+		{
+			name: "reasoning effort maps to -c model_reasoning_effort",
+			config: Config{
+				Provider: ProviderOpenAI,
+				Flavor:   FlavorCLI,
+				Model:    "gpt-test",
+			},
+			request:  Request{MaxTokens: 32, Messages: []Message{User("q")}, Effort: EffortMax},
+			wantPath: "codex",
+			wantArgs: []string{
+				"exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", "--model", "gpt-test",
+				"-c", "model_reasoning_effort=max", "-",
+			},
+			wantPrompt: "q",
+		},
 	}
 
 	for _, test := range tests {

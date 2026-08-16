@@ -143,8 +143,9 @@ func TestSupportsMatchesImplementedFeatures(t *testing.T) {
 	for _, mt := range matrixColumns {
 		client := clientFor(t, mt)
 		for _, row := range matrixRows {
-			// Structured output is implemented on every target; nothing else is yet.
-			want := row.feature == FeatureStructuredOutput
+			// Structured output and reasoning effort are implemented on every
+			// target; nothing else is yet.
+			want := row.feature == FeatureStructuredOutput || row.feature == FeatureReasoningEffort
 			if got := client.Supports(row.feature); got != want {
 				t.Errorf("%s/%s Supports(%q) = %v, want %v", mt.provider, mt.flavor, row.feature, got, want)
 			}

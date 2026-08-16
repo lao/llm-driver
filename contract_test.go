@@ -124,6 +124,59 @@ func TestContractStructuredOutputAcrossFourTargets(t *testing.T) {
 	}
 }
 
+// TestContractEffortAcrossFourTargets sends a supported effort level to every
+// target and asserts each maps it (the transport is reached and the call
+// succeeds), then asserts openai/api rejects an out-of-ceiling value with
+// ErrUnsupportedFeature before any transport call — values are never remapped.
+func TestContractEffortAcrossFourTargets(t *testing.T) {
+	t.Parallel()
+
+	for _, target := range contractTargets() {
+		t.Run(string(target.provider)+"/"+string(target.flavor), func(t *testing.T) {
+			t.Parallel()
+
+			config, runner, calls := newContractTarget(t, target.provider, target.flavor)
+			client, err := newClient(config, runner)
+			if err != nil {
+				t.Fatalf("New(): %v", err)
+			}
+			if !client.Supports(FeatureReasoningEffort) {
+				t.Fatal("Supports(FeatureReasoningEffort) = false")
+			}
+
+			// EffortMedium is inside every target's allowed set, including openai/api.
+			if _, err := client.Generate(context.Background(), Request{
+				MaxTokens: 64,
+				Messages:  []Message{User("q")},
+				Effort:    EffortMedium,
+			}); err != nil {
+				t.Fatalf("Generate() with effort: %v", err)
+			}
+			if got := calls(); got != 1 {
+				t.Fatalf("transport calls = %d, want 1", got)
+			}
+
+			// openai/api tops out at high: xhigh and max are rejected loudly and
+			// never reach the transport.
+			if target.provider == ProviderOpenAI && target.flavor == FlavorAPI {
+				for _, value := range []Effort{EffortXHigh, EffortMax} {
+					_, err := client.Generate(context.Background(), Request{
+						MaxTokens: 64,
+						Messages:  []Message{User("q")},
+						Effort:    value,
+					})
+					if !errors.Is(err, ErrUnsupportedFeature) {
+						t.Fatalf("effort %q error = %v, want ErrUnsupportedFeature", value, err)
+					}
+					if got := calls(); got != 1 {
+						t.Fatalf("transport called for rejected effort %q: calls = %d", value, got)
+					}
+				}
+			}
+		})
+	}
+}
+
 func newContractStructuredTarget(t *testing.T, provider Provider, flavor Flavor) (Config, core.CommandRunner) {
 	t.Helper()
 

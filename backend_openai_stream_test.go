@@ -322,10 +322,32 @@ func TestOpenAIStreamIncompleteResponseDetails(t *testing.T) {
 		}
 	})
 
-	t.Run("other incomplete reasons are errors", func(t *testing.T) {
+	t.Run("content filter is a successful truncation", func(t *testing.T) {
 		t.Parallel()
 
 		client, _ := newOpenAIStreamClient(t, http.StatusOK, incompleteEvent("content_filter"))
+		stream, err := client.GenerateStream(context.Background(), Request{
+			MaxTokens: 64,
+			Messages:  []Message{User("hello")},
+		})
+		if err != nil {
+			t.Fatalf("GenerateStream(): %v", err)
+		}
+		defer stream.Close()
+
+		_, err, response := collectStream(t, stream)
+		if err != nil {
+			t.Fatalf("stream error: %v", err)
+		}
+		if response.CompletionReason != CompletionReasonContentFilter {
+			t.Fatalf("completion reason = %q, want %q", response.CompletionReason, CompletionReasonContentFilter)
+		}
+	})
+
+	t.Run("other incomplete reasons are errors", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := newOpenAIStreamClient(t, http.StatusOK, incompleteEvent("moderation"))
 		stream, err := client.GenerateStream(context.Background(), Request{
 			MaxTokens: 64,
 			Messages:  []Message{User("hello")},
@@ -343,10 +365,10 @@ func TestOpenAIStreamIncompleteResponseDetails(t *testing.T) {
 		if target.Provider != ProviderOpenAI || target.Flavor != FlavorAPI || target.Operation != "generate_stream" {
 			t.Fatalf("error context = %+v", target)
 		}
-		if target.Code != "content_filter" {
-			t.Fatalf("code = %q, want content_filter", target.Code)
+		if target.Code != "moderation" {
+			t.Fatalf("code = %q, want moderation", target.Code)
 		}
-		if !strings.Contains(target.Message, "content_filter") {
+		if !strings.Contains(target.Message, "moderation") {
 			t.Fatalf("message = %q, want it to name the incomplete reason", target.Message)
 		}
 	})

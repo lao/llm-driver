@@ -219,6 +219,43 @@ func TestAnthropicGenerateStructuredOutput(t *testing.T) {
 	}
 }
 
+func TestAnthropicGenerateMapsEffort(t *testing.T) {
+	t.Parallel()
+
+	response := `{"id":"msg_e","type":"message","role":"assistant","model":"claude-test",` +
+		`"content":[{"type":"text","text":"ok"}],"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{
+		Provider: ProviderClaude,
+		Flavor:   FlavorAPI,
+		Model:    "claude-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	result, err := client.Generate(context.Background(), Request{
+		MaxTokens: 64,
+		Messages:  []Message{User("q")},
+		Effort:    EffortXHigh,
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	// Effort maps to output_config.effort with the neutral value passed through.
+	outputConfig, ok := captured.body["output_config"].(map[string]any)
+	if !ok || outputConfig["effort"] != "xhigh" {
+		t.Fatalf("output_config = %#v", captured.body["output_config"])
+	}
+	// tool_use stop reason maps to the new completion reason.
+	if result.CompletionReason != CompletionReasonToolUse {
+		t.Fatalf("completion reason = %q, want %q", result.CompletionReason, CompletionReasonToolUse)
+	}
+}
+
 func TestAnthropicGenerateStructuredOutputRejectsNonJSON(t *testing.T) {
 	t.Parallel()
 
