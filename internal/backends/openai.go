@@ -78,6 +78,9 @@ func (b *openAIBackend) params(request core.Request) responses.ResponseNewParams
 			case core.ToolCallPart:
 				input = append(input, responses.ResponseInputItemParamOfFunctionCall(string(p.Input), p.ID, p.Name))
 			case core.ToolResultPart:
+				// function_call_output has no error field, so ToolResultPart.IsError
+				// is dropped here (honored only on claude/api); Content still reaches
+				// the model.
 				input = append(input, responses.ResponseInputItemParamOfFunctionCallOutput(p.ToolCallID, p.Content))
 			default:
 				panic(fmt.Sprintf("openai: unhandled part type %T (core validation should reject it)", part))

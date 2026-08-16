@@ -62,7 +62,10 @@ type ToolResultPart struct {
 	ToolCallID string
 	// Content is the tool's textual result.
 	Content string
-	// IsError reports whether Content describes a tool execution failure.
+	// IsError reports whether Content describes a tool execution failure. It is
+	// honored only on claude/api; the OpenAI Responses API has no error flag on
+	// function_call_output, so on openai/api the Content still reaches the model
+	// but the error signal is dropped.
 	IsError bool
 }
 
