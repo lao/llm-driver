@@ -500,6 +500,58 @@ func TestAnthropicGenerateToolRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAnthropicGenerateToolChoiceNamed(t *testing.T) {
+	t.Parallel()
+
+	response := `{"id":"msg_c","type":"message","role":"assistant","model":"claude-test",` +
+		`"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{Provider: ProviderClaude, Flavor: FlavorAPI, Model: "claude-test", APIKey: "test-key", BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	if _, err := client.Generate(context.Background(), Request{
+		MaxTokens:  64,
+		Messages:   []Message{User("weather?")},
+		Tools:      []Tool{{Name: "get_weather", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: ToolChoice{Mode: ToolChoiceTool, Name: "get_weather"},
+	}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	choice, ok := captured.body["tool_choice"].(map[string]any)
+	if !ok || choice["type"] != "tool" || choice["name"] != "get_weather" {
+		t.Fatalf("tool_choice = %#v", captured.body["tool_choice"])
+	}
+}
+
+func TestAnthropicGenerateToolChoiceNone(t *testing.T) {
+	t.Parallel()
+
+	response := `{"id":"msg_n","type":"message","role":"assistant","model":"claude-test",` +
+		`"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{Provider: ProviderClaude, Flavor: FlavorAPI, Model: "claude-test", APIKey: "test-key", BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	if _, err := client.Generate(context.Background(), Request{
+		MaxTokens:  64,
+		Messages:   []Message{User("weather?")},
+		Tools:      []Tool{{Name: "get_weather", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: ToolChoice{Mode: ToolChoiceNone},
+	}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	choice, ok := captured.body["tool_choice"].(map[string]any)
+	if !ok || choice["type"] != "none" {
+		t.Fatalf("tool_choice = %#v", captured.body["tool_choice"])
+	}
+}
+
 func TestAnthropicGenerateStructuredOutputRejectsNonJSON(t *testing.T) {
 	t.Parallel()
 
