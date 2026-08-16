@@ -152,6 +152,39 @@ Errors carry provider, flavor, operation, status, and provider code when those
 values are available. Use `errors.Is` for sentinels such as
 `ErrInvalidRequest` and `ErrExecutableNotFound`, and `errors.As` for `*Error`.
 
+## Capabilities
+
+Beyond the baseline surface (system text, messages, `MaxTokens`, streaming),
+each optional generation feature is either supported on a target or rejected
+with `ErrUnsupportedFeature` — the library never silently degrades. `Generate`
+and `GenerateStream` validate a request against the selected target before
+invoking it, and `Client.Supports(feature)` answers the same question ahead of
+time.
+
+`✓` = supported; `✗` = rejected with `ErrUnsupportedFeature` naming the feature
+and target.
+
+| Feature | claude/api | openai/api | claude/cli | codex/cli |
+| --- | --- | --- | --- | --- |
+| System, messages, MaxTokens, streaming | ✓ | ✓ | ✓ | ✓ |
+| Structured output (JSON schema) | ✗ | ✗ | ✗ | ✗ |
+| Reasoning effort | ✗ | ✗ | ✗ | ✗ |
+| Reasoning/thinking visibility | ✗ | ✗ | ✗ | ✗ |
+| Tool calling (caller-executed) | ✗ | ✗ | ✗ | ✗ |
+| Image input | ✗ | ✗ | ✗ | ✗ |
+| PDF/document input | ✗ | ✗ | ✗ | ✗ |
+| Temperature / TopP | ✗ | ✗ | ✗ | ✗ |
+| TopK | ✗ | ✗ | ✗ | ✗ |
+| Stop sequences | ✗ | ✗ | ✗ | ✗ |
+| Web search | ✗ | ✗ | ✗ | ✗ |
+| Metadata / end-user ID | ✗ | ✗ | ✗ | ✗ |
+| Conversation continuation by ID | ✗ | ✗ | ✗ | ✗ |
+| Token counting | ✗ | ✗ | ✗ | ✗ |
+
+The optional features are not yet implemented; later releases flip cells as
+each target gains support. `codex/cli` is the `openai` provider with the `cli`
+flavor.
+
 ## Scope and CLI differences
 
 The shared contract is text-only generation, batch or streaming, with system
@@ -180,7 +213,8 @@ the hosted APIs:
   item on some versions, so a whole answer can arrive as one large chunk.
 
 Tool/function calling, images, structured output, retries, automatic fallback,
-and persisted conversations are outside this library's current scope.
+and persisted conversations are not yet implemented; requesting one currently
+fails with `ErrUnsupportedFeature` (see the capability matrix above).
 
 ## Develop
 

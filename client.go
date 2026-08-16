@@ -53,6 +53,14 @@ func (c *Client) Generate(ctx context.Context, request Request) (*Response, erro
 			Err:       err,
 		}
 	}
+	if err := core.ValidateRequestFor(c.provider, c.flavor, request); err != nil {
+		return nil, &Error{
+			Provider:  c.provider,
+			Flavor:    c.flavor,
+			Operation: "generate",
+			Err:       err,
+		}
+	}
 
 	response, err := c.backend.Generate(ctx, request)
 	if err != nil {
@@ -73,4 +81,12 @@ func (c *Client) Generate(ctx context.Context, request Request) (*Response, erro
 		response.Model = c.model
 	}
 	return response, nil
+}
+
+// Supports reports whether the client's configured target honors the feature.
+// It answers straight from the capability table Generate and GenerateStream
+// validate against; a request exercising only supported features passes that
+// validation, and an unsupported one fails with ErrUnsupportedFeature.
+func (c *Client) Supports(feature Feature) bool {
+	return core.Supports(c.provider, c.flavor, feature)
 }
