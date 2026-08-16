@@ -39,6 +39,8 @@ func TestNormalizeAnthropicCompletionReason(t *testing.T) {
 		want   core.CompletionReason
 	}{
 		{name: "end turn", reason: anthropic.StopReasonEndTurn, want: core.CompletionReasonStop},
+		// A stop-sequence ending is a normal stop, not a distinct reason.
+		{name: "stop sequence", reason: anthropic.StopReasonStopSequence, want: core.CompletionReasonStop},
 		{name: "maximum tokens", reason: anthropic.StopReasonMaxTokens, want: core.CompletionReasonMaxTokens},
 		{name: "refusal", reason: anthropic.StopReasonRefusal, want: core.CompletionReasonRefusal},
 	}

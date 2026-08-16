@@ -170,19 +170,21 @@ and target.
 | Structured output (JSON schema) | ✓ | ✓ | ✓ | ✓ |
 | Reasoning effort | ✓ | ✓ | ✓ | ✓ |
 | Reasoning/thinking visibility | ✗ | ✗ | ✗ | ✗ |
-| Tool calling (caller-executed) | ✗ | ✗ | ✗ | ✗ |
+| Tool calling (caller-executed) | ✓ | ✓ | ✗ | ✗ |
 | Image input | ✗ | ✗ | ✗ | ✗ |
 | PDF/document input | ✗ | ✗ | ✗ | ✗ |
-| Temperature / TopP | ✗ | ✗ | ✗ | ✗ |
-| TopK | ✗ | ✗ | ✗ | ✗ |
-| Stop sequences | ✗ | ✗ | ✗ | ✗ |
+| Temperature / TopP | ✓ | ✓ | ✗ | ✗ |
+| TopK | ✓ | ✗ | ✗ | ✗ |
+| Stop sequences | ✓ | ✗ | ✗ | ✗ |
 | Web search | ✗ | ✗ | ✗ | ✗ |
-| Metadata / end-user ID | ✗ | ✗ | ✗ | ✗ |
+| Metadata / end-user ID | ✓ | ✓ | ✗ | ✗ |
 | Conversation continuation by ID | ✗ | ✗ | ✗ | ✗ |
 | Token counting | ✗ | ✗ | ✗ | ✗ |
 
-Structured output and reasoning effort are supported on every target; the
-remaining optional features are not yet implemented, and later releases flip
+Structured output and reasoning effort are supported on every target. Sampling
+params (temperature/top-p) and the end-user ID map on both API flavors, with
+top-k and stop sequences on `claude/api` only (the Responses API lacks both).
+The remaining optional features are not yet implemented, and later releases flip
 cells as each target gains support. `codex/cli` is the `openai` provider with the
 `cli` flavor.
 
@@ -264,6 +266,59 @@ go run ./examples/switchable \
   --prompt "Prove there are infinitely many primes." \
   --effort high
 ```
+
+## Tool calling
+
+Offer caller-executed tools with `Request.Tools` and, optionally, constrain
+selection with `Request.ToolChoice` (the zero value is auto; `ToolChoiceNone`,
+`ToolChoiceRequired`, and `ToolChoiceTool` with a `Name` are the alternatives).
+When the model calls a tool the response carries `CompletionReasonToolUse` and
+one `ToolCall` per invocation (parallel calls preserved in order). You run each
+call and feed the results back as `ToolResult` messages, echoing the model's
+calls so the provider sees the conversation it produced:
+
+```go
+tools := []llmdriver.Tool{{
+	Name:        "get_weather",
+	Description: "Current weather for a city",
+	InputSchema: json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`),
+}}
+
+messages := []llmdriver.Message{llmdriver.User("What's the weather in SF?")}
+for {
+	response, err := client.Generate(ctx, llmdriver.Request{
+		Messages:  messages,
+		MaxTokens: 1024,
+		Tools:     tools,
+	})
+	if err != nil {
+		return err
+	}
+	if response.CompletionReason != llmdriver.CompletionReasonToolUse {
+		fmt.Println(response.Text)
+		break
+	}
+
+	// Echo the assistant's tool calls, then append each tool's result.
+	parts := make([]llmdriver.Part, len(response.ToolCalls))
+	for i, call := range response.ToolCalls {
+		parts[i] = llmdriver.ToolCallPart{ID: call.ID, Name: call.Name, Input: call.Input}
+	}
+	messages = append(messages, llmdriver.Message{Role: llmdriver.RoleAssistant, Parts: parts})
+	for _, call := range response.ToolCalls {
+		result := runTool(call.Name, call.Input) // your code
+		messages = append(messages, llmdriver.ToolResult(call.ID, result, false))
+	}
+}
+```
+
+Streaming surfaces a tool call's JSON arguments incrementally as
+`KindToolInput` chunks (`Chunk.Kind`); the parsed `ToolCalls` are on the final
+`Response`. A `Message` sets exactly one of `Text` or `Parts` — the existing
+`User`/`Assistant` helpers stay text-only, and tool echoes and results use
+`Parts`. Tool calling is an API-flavor feature: `claude/api` and `openai/api`
+map `tools`/`tool_choice` natively, while `claude/cli` and `codex/cli` reject
+`Tools` or tool parts with `ErrUnsupportedFeature`.
 
 ## Scope and CLI differences
 

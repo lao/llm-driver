@@ -49,4 +49,13 @@
 // reject a request exercising an unsupported feature with ErrUnsupportedFeature,
 // naming the feature and target rather than silently degrading. The README
 // capability matrix lists each feature's support across the four targets.
+//
+// Tool calling (API flavors only) is driven by Request.Tools and
+// Request.ToolChoice. When the model calls a tool the Response carries
+// CompletionReasonToolUse and one ToolCall per invocation; the caller runs each
+// call and replies with ToolResult messages, echoing the calls as ToolCallPart
+// content. A Message sets exactly one of Text or Parts: Text is the text-only
+// fast path the User and Assistant helpers produce, and Parts carries tool
+// calls and results. Streaming surfaces tool-argument deltas as Chunk values
+// with Kind KindToolInput, with the parsed ToolCalls on the final Response.
 package llmdriver

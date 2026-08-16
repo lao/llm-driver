@@ -139,6 +139,70 @@ func TestAnthropicStreamStructuredOutput(t *testing.T) {
 	}
 }
 
+func TestAnthropicStreamToolCalls(t *testing.T) {
+	t.Parallel()
+
+	// A tool_use block streams its input as input_json_delta fragments. The
+	// fragments surface as KindToolInput chunks and the accumulated call appears
+	// on the final response — never mixed into Response.Text.
+	events := []string{
+		anthropicSSEEvents()[0],
+		"event: content_block_start\n" +
+			`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_a","name":"get_weather","input":{}}}` + "\n\n",
+		"event: content_block_delta\n" +
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":"}}` + "\n\n",
+		"event: content_block_delta\n" +
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"SF\"}"}}` + "\n\n",
+		"event: content_block_stop\n" +
+			`data: {"type":"content_block_stop","index":0}` + "\n\n",
+		"event: message_delta\n" +
+			`data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":6}}` + "\n\n",
+		anthropicSSEEvents()[6],
+	}
+
+	client, _ := newAnthropicStreamClient(t, http.StatusOK, events)
+	stream, err := client.GenerateStream(context.Background(), Request{
+		MaxTokens: 64,
+		Messages:  []Message{User("weather?")},
+		Tools:     []Tool{{Name: "get_weather", InputSchema: structuredSchema}},
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+
+	var toolInput strings.Builder
+	for stream.Next() {
+		chunk := stream.Current()
+		if chunk.Kind != KindToolInput {
+			t.Fatalf("chunk kind = %v, want KindToolInput: %+v", chunk.Kind, chunk)
+		}
+		toolInput.WriteString(chunk.Text)
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	if toolInput.String() != `{"city":"SF"}` {
+		t.Fatalf("streamed tool input = %q", toolInput.String())
+	}
+
+	response, err := stream.Response()
+	if err != nil {
+		t.Fatalf("Response(): %v", err)
+	}
+	// Tool input must not leak into Response.Text.
+	if response.Text != "" {
+		t.Fatalf("Text = %q, want empty for a tool-only turn", response.Text)
+	}
+	if response.CompletionReason != CompletionReasonToolUse {
+		t.Fatalf("completion reason = %q", response.CompletionReason)
+	}
+	if len(response.ToolCalls) != 1 || response.ToolCalls[0].ID != "call_a" ||
+		response.ToolCalls[0].Name != "get_weather" || string(response.ToolCalls[0].Input) != `{"city":"SF"}` {
+		t.Fatalf("tool calls = %#v", response.ToolCalls)
+	}
+}
+
 func TestAnthropicStreamErrors(t *testing.T) {
 	t.Parallel()
 

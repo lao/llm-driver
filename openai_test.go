@@ -2,6 +2,7 @@ package llmdriver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -133,6 +134,12 @@ func TestOpenAIGenerateMapsRequestAndResponse(t *testing.T) {
 	if _, ok := captured.body["text"]; ok {
 		t.Fatalf("text present without OutputSchema: %#v", captured.body["text"])
 	}
+	// Backward compat: no sampling fields => none appear in the request body.
+	for _, key := range []string{"temperature", "top_p", "safety_identifier"} {
+		if _, ok := captured.body[key]; ok {
+			t.Fatalf("%s present without sampling params: %#v", key, captured.body[key])
+		}
+	}
 
 	input, ok := captured.body["input"].([]any)
 	if !ok || len(input) != 3 {
@@ -258,6 +265,72 @@ func TestOpenAIGenerateMapsEffort(t *testing.T) {
 	}
 }
 
+func TestOpenAIGenerateMapsSamplingParams(t *testing.T) {
+	t.Parallel()
+
+	const response = `{
+  "id":"resp_p","object":"response","status":"completed","model":"gpt-test",
+  "output":[{"id":"m","type":"message","status":"completed","role":"assistant",
+    "content":[{"type":"output_text","text":"ok","annotations":[],"logprobs":[]}]}],
+  "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{
+		Provider: ProviderOpenAI,
+		Flavor:   FlavorAPI,
+		Model:    "gpt-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	temp, topP := 0.5, 0.9
+	if _, err := client.Generate(context.Background(), Request{
+		MaxTokens:   64,
+		Messages:    []Message{User("q")},
+		Temperature: &temp,
+		TopP:        &topP,
+		UserID:      "user-1",
+	}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	// Temperature/TopP pass through; UserID maps to safety_identifier.
+	if captured.body["temperature"] != 0.5 || captured.body["top_p"] != 0.9 {
+		t.Fatalf("sampling params = %+v", captured.body)
+	}
+	if captured.body["safety_identifier"] != "user-1" {
+		t.Fatalf("safety_identifier = %#v", captured.body["safety_identifier"])
+	}
+}
+
+func TestOpenAIStreamMapsSamplingParams(t *testing.T) {
+	t.Parallel()
+
+	client, captured := newOpenAIStreamClient(t, http.StatusOK, openAISSEEvents())
+	temp, topP := 0.5, 0.9
+	stream, err := client.GenerateStream(context.Background(), Request{
+		MaxTokens:   64,
+		Messages:    []Message{User("hello")},
+		Temperature: &temp,
+		TopP:        &topP,
+		UserID:      "user-1",
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+	if _, err, _ := collectStream(t, stream); err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+
+	if captured.body["temperature"] != 0.5 || captured.body["top_p"] != 0.9 || captured.body["safety_identifier"] != "user-1" {
+		t.Fatalf("sampling params = %+v", captured.body)
+	}
+}
+
 func TestOpenAIGeneratePreservesContentFilterResult(t *testing.T) {
 	t.Parallel()
 
@@ -335,6 +408,161 @@ func TestOpenAIGeneratePreservesRefusal(t *testing.T) {
 	}
 	if result.Usage != (Usage{InputTokens: 4, OutputTokens: 6}) {
 		t.Fatalf("usage = %+v", result.Usage)
+	}
+}
+
+func TestOpenAIGenerateToolRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	// First turn: two parallel function_call output items.
+	response := `{"id":"resp_t","object":"response","status":"completed","model":"gpt-test",` +
+		`"output":[` +
+		`{"id":"fc_a","type":"function_call","status":"completed","call_id":"call_a","name":"get_weather","arguments":"{\"city\":\"SF\"}"},` +
+		`{"id":"fc_b","type":"function_call","status":"completed","call_id":"call_b","name":"get_time","arguments":"{\"tz\":\"PT\"}"}` +
+		`],"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{Provider: ProviderOpenAI, Flavor: FlavorAPI, Model: "gpt-test", APIKey: "test-key", BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	weatherSchema := json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}}}`)
+	result, err := client.Generate(context.Background(), Request{
+		MaxTokens:  64,
+		Messages:   []Message{User("weather and time?")},
+		Tools:      []Tool{{Name: "get_weather", Description: "weather by city", InputSchema: weatherSchema}, {Name: "get_time", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: ToolChoice{Mode: ToolChoiceRequired},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	// Request maps function tools and tool_choice.
+	tools, ok := captured.body["tools"].([]any)
+	if !ok || len(tools) != 2 {
+		t.Fatalf("tools = %#v", captured.body["tools"])
+	}
+	tool0 := tools[0].(map[string]any)
+	if tool0["type"] != "function" || tool0["name"] != "get_weather" || tool0["description"] != "weather by city" {
+		t.Fatalf("tools[0] = %#v", tool0)
+	}
+	if params, ok := tool0["parameters"].(map[string]any); !ok || params["type"] != "object" {
+		t.Fatalf("tools[0].parameters = %#v", tool0["parameters"])
+	}
+	if captured.body["tool_choice"] != "required" {
+		t.Fatalf("tool_choice = %#v", captured.body["tool_choice"])
+	}
+
+	// Parallel calls preserved in order, with tool_use completion reason.
+	if result.CompletionReason != CompletionReasonToolUse {
+		t.Fatalf("completion reason = %q, want %q", result.CompletionReason, CompletionReasonToolUse)
+	}
+	if len(result.ToolCalls) != 2 {
+		t.Fatalf("tool calls = %#v", result.ToolCalls)
+	}
+	if result.ToolCalls[0].ID != "call_a" || result.ToolCalls[0].Name != "get_weather" || string(result.ToolCalls[0].Input) != `{"city":"SF"}` {
+		t.Fatalf("tool call 0 = %#v", result.ToolCalls[0])
+	}
+	if result.ToolCalls[1].ID != "call_b" {
+		t.Fatalf("tool call 1 = %#v", result.ToolCalls[1])
+	}
+
+	// Second turn: echo the function calls and reply with results.
+	follow, captured2 := newAPITestServer(t, http.StatusOK,
+		`{"id":"resp_f","object":"response","status":"completed","model":"gpt-test",`+
+			`"output":[{"id":"m","type":"message","status":"completed","role":"assistant",`+
+			`"content":[{"type":"output_text","text":"Sunny, noon.","annotations":[],"logprobs":[]}]}],`+
+			`"usage":{"input_tokens":9,"output_tokens":4,"total_tokens":13}}`)
+	client2, err := New(Config{Provider: ProviderOpenAI, Flavor: FlavorAPI, Model: "gpt-test", APIKey: "test-key", BaseURL: follow.URL})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	final, err := client2.Generate(context.Background(), Request{
+		MaxTokens: 64,
+		Messages: []Message{
+			User("weather and time?"),
+			{Role: RoleAssistant, Parts: []Part{
+				ToolCallPart{ID: "call_a", Name: "get_weather", Input: result.ToolCalls[0].Input},
+				ToolCallPart{ID: "call_b", Name: "get_time", Input: result.ToolCalls[1].Input},
+			}},
+			ToolResult("call_a", "Sunny", false),
+			ToolResult("call_b", "noon", false),
+		},
+	})
+	if err != nil {
+		t.Fatalf("follow-up Generate(): %v", err)
+	}
+	if final.Text != "Sunny, noon." {
+		t.Fatalf("final text = %q", final.Text)
+	}
+
+	// Follow-up input carries function_call items and function_call_output items.
+	input := captured2.body["input"].([]any)
+	if len(input) != 5 {
+		t.Fatalf("follow-up input = %#v", input)
+	}
+	call := input[1].(map[string]any)
+	if call["type"] != "function_call" || call["call_id"] != "call_a" || call["name"] != "get_weather" || call["arguments"] != `{"city":"SF"}` {
+		t.Fatalf("function_call item = %#v", call)
+	}
+	output := input[3].(map[string]any)
+	if output["type"] != "function_call_output" || output["call_id"] != "call_a" || output["output"] != "Sunny" {
+		t.Fatalf("function_call_output item = %#v", output)
+	}
+}
+
+func TestOpenAIGenerateToolChoiceNamed(t *testing.T) {
+	t.Parallel()
+
+	response := `{"id":"resp_c","object":"response","status":"completed","model":"gpt-test",` +
+		`"output":[{"id":"m","type":"message","status":"completed","role":"assistant",` +
+		`"content":[{"type":"output_text","text":"ok","annotations":[],"logprobs":[]}]}],` +
+		`"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{Provider: ProviderOpenAI, Flavor: FlavorAPI, Model: "gpt-test", APIKey: "test-key", BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	if _, err := client.Generate(context.Background(), Request{
+		MaxTokens:  64,
+		Messages:   []Message{User("weather?")},
+		Tools:      []Tool{{Name: "get_weather", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: ToolChoice{Mode: ToolChoiceTool, Name: "get_weather"},
+	}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	choice, ok := captured.body["tool_choice"].(map[string]any)
+	if !ok || choice["type"] != "function" || choice["name"] != "get_weather" {
+		t.Fatalf("tool_choice = %#v", captured.body["tool_choice"])
+	}
+}
+
+func TestOpenAIGenerateToolChoiceNone(t *testing.T) {
+	t.Parallel()
+
+	response := `{"id":"resp_n","object":"response","status":"completed","model":"gpt-test",` +
+		`"output":[{"id":"m","type":"message","status":"completed","role":"assistant",` +
+		`"content":[{"type":"output_text","text":"ok","annotations":[],"logprobs":[]}]}],` +
+		`"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{Provider: ProviderOpenAI, Flavor: FlavorAPI, Model: "gpt-test", APIKey: "test-key", BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	if _, err := client.Generate(context.Background(), Request{
+		MaxTokens:  64,
+		Messages:   []Message{User("weather?")},
+		Tools:      []Tool{{Name: "get_weather", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: ToolChoice{Mode: ToolChoiceNone},
+	}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	if captured.body["tool_choice"] != "none" {
+		t.Fatalf("tool_choice = %#v", captured.body["tool_choice"])
 	}
 }
 

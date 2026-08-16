@@ -97,8 +97,13 @@ func parseOptions(args []string, output io.Writer) (parsedOptions, error) {
 	stream := flags.Bool("stream", false, "print response text incrementally as it arrives")
 	schemaPath := flags.String("schema", "", "path to a JSON Schema file; constrains output to a matching JSON document")
 	effort := flags.String("effort", "", "reasoning effort: low, medium, high, xhigh, or max (openai/api tops out at high)")
+	temperature := flags.Float64("temperature", 0, "sampling temperature (API flavors); passed through to the provider")
+	topP := flags.Float64("top-p", 0, "nucleus-sampling top-p (API flavors); passed through to the provider")
+	topK := flags.Int("top-k", 0, "top-k sampling (claude/api only)")
+	stop := flags.String("stop", "", "comma-separated stop sequences (claude/api only)")
+	user := flags.String("user", "", "end-user identifier for abuse tracking (API flavors)")
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: switchable --provider <claude|openai> --flavor <api|cli> --model <name> --prompt <text> [--max-tokens <n>] [--stream] [--schema <file>] [--effort <level>]")
+		fmt.Fprintln(output, "Usage: switchable --provider <claude|openai> --flavor <api|cli> --model <name> --prompt <text> [--max-tokens <n>] [--stream] [--schema <file>] [--effort <level>] [--temperature <n>] [--top-p <n>] [--top-k <n>] [--stop <a,b>] [--user <id>]")
 		fmt.Fprintln(output)
 		flags.PrintDefaults()
 		fmt.Fprintln(output, "\nAuthentication:")
@@ -146,6 +151,25 @@ func parseOptions(args []string, output io.Writer) (parsedOptions, error) {
 		// Pass the value straight through; the client validates it against the
 		// selected target and rejects an unsupported level with ErrUnsupportedFeature.
 		request.Effort = llmdriver.Effort(*effort)
+	}
+	// Sampling params are pointers so an unset flag stays nil (today's behavior);
+	// flags.Visit reports which numeric flags the user actually provided.
+	set := make(map[string]bool)
+	flags.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if set["temperature"] {
+		request.Temperature = temperature
+	}
+	if set["top-p"] {
+		request.TopP = topP
+	}
+	if set["top-k"] {
+		request.TopK = topK
+	}
+	if *stop != "" {
+		request.StopSequences = strings.Split(*stop, ",")
+	}
+	if *user != "" {
+		request.UserID = *user
 	}
 
 	return parsedOptions{

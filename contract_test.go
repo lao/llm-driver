@@ -177,6 +177,197 @@ func TestContractEffortAcrossFourTargets(t *testing.T) {
 	}
 }
 
+// TestContractSamplingParamsAcrossFourTargets asserts the Phase 4 support map:
+// Temperature/TopP/UserID map on both API flavors and are rejected with
+// ErrUnsupportedFeature (before any transport call) on both CLI flavors; TopK
+// and StopSequences are supported only on claude/api and rejected everywhere
+// else, including openai/api (the Responses API lacks both).
+func TestContractSamplingParamsAcrossFourTargets(t *testing.T) {
+	t.Parallel()
+
+	temp, topP, topK := 0.5, 0.9, 40
+	for _, target := range contractTargets() {
+		t.Run(string(target.provider)+"/"+string(target.flavor), func(t *testing.T) {
+			t.Parallel()
+
+			config, runner, calls := newContractTarget(t, target.provider, target.flavor)
+			client, err := newClient(config, runner)
+			if err != nil {
+				t.Fatalf("New(): %v", err)
+			}
+			apiFlavor := target.flavor == FlavorAPI
+			claudeAPI := target.provider == ProviderClaude && apiFlavor
+
+			// Temperature/TopP/UserID: mapped on API flavors, rejected on CLI.
+			_, err = client.Generate(context.Background(), Request{
+				MaxTokens:   64,
+				Messages:    []Message{User("q")},
+				Temperature: &temp,
+				TopP:        &topP,
+				UserID:      "u1",
+			})
+			if apiFlavor {
+				if err != nil {
+					t.Fatalf("Generate() sampling: %v", err)
+				}
+				if calls() != 1 {
+					t.Fatalf("transport calls = %d, want 1", calls())
+				}
+				if !client.Supports(FeatureSamplingParams) || !client.Supports(FeatureUserID) {
+					t.Fatal("Supports(sampling/user id) = false on API flavor")
+				}
+			} else {
+				if !errors.Is(err, ErrUnsupportedFeature) {
+					t.Fatalf("Generate() sampling error = %v, want ErrUnsupportedFeature", err)
+				}
+				if calls() != 0 {
+					t.Fatalf("transport called for rejected sampling: calls = %d", calls())
+				}
+				if client.Supports(FeatureSamplingParams) || client.Supports(FeatureUserID) {
+					t.Fatal("Supports(sampling/user id) = true on CLI flavor")
+				}
+			}
+
+			// TopK and StopSequences: claude/api only.
+			for _, request := range []Request{
+				{MaxTokens: 64, Messages: []Message{User("q")}, TopK: &topK},
+				{MaxTokens: 64, Messages: []Message{User("q")}, StopSequences: []string{"STOP"}},
+			} {
+				before := calls()
+				_, err := client.Generate(context.Background(), request)
+				if claudeAPI {
+					if err != nil {
+						t.Fatalf("Generate() topk/stop: %v", err)
+					}
+					if calls() != before+1 {
+						t.Fatalf("transport calls = %d, want %d", calls(), before+1)
+					}
+				} else {
+					if !errors.Is(err, ErrUnsupportedFeature) {
+						t.Fatalf("Generate() topk/stop error = %v, want ErrUnsupportedFeature", err)
+					}
+					if calls() != before {
+						t.Fatalf("transport called for rejected topk/stop: calls = %d", calls())
+					}
+				}
+			}
+			if got := claudeAPI; client.Supports(FeatureTopK) != got || client.Supports(FeatureStopSequences) != got {
+				t.Fatalf("Supports(topk/stop) mismatch on %s/%s", target.provider, target.flavor)
+			}
+		})
+	}
+}
+
+// TestContractToolCallingAcrossFourTargets asserts the Phase 5 support map: both
+// API flavors map a tool request and return an identical normalized tool call
+// with CompletionReasonToolUse, while both CLI flavors reject tools — and tool
+// content parts — with ErrUnsupportedFeature before any transport call.
+func TestContractToolCallingAcrossFourTargets(t *testing.T) {
+	t.Parallel()
+
+	weatherTool := Tool{Name: "get_weather", InputSchema: structuredSchema}
+	for _, target := range contractTargets() {
+		t.Run(string(target.provider)+"/"+string(target.flavor), func(t *testing.T) {
+			t.Parallel()
+
+			config, runner, calls := newContractToolTarget(t, target.provider, target.flavor)
+			client, err := newClient(config, runner)
+			if err != nil {
+				t.Fatalf("New(): %v", err)
+			}
+
+			if target.flavor == FlavorCLI {
+				if client.Supports(FeatureTools) {
+					t.Fatal("Supports(FeatureTools) = true on CLI flavor")
+				}
+				// Tools, tool-result parts, and any Parts usage all trip the same
+				// rejection before the transport is ever reached — a CLI flavor
+				// cannot render Parts, so it must fail loudly rather than drop the
+				// content that only lives there (even a plain TextPart).
+				for _, request := range []Request{
+					{MaxTokens: 64, Messages: []Message{User("q")}, Tools: []Tool{weatherTool}},
+					{MaxTokens: 64, Messages: []Message{ToolResult("call_a", "72F", false)}},
+					{MaxTokens: 64, Messages: []Message{{Role: RoleUser, Parts: []Part{TextPart{Text: "hi"}}}}},
+				} {
+					_, err := client.Generate(context.Background(), request)
+					if !errors.Is(err, ErrUnsupportedFeature) {
+						t.Fatalf("Generate() tools error = %v, want ErrUnsupportedFeature", err)
+					}
+				}
+				if calls() != 0 {
+					t.Fatalf("transport called for rejected tools: calls = %d", calls())
+				}
+				return
+			}
+
+			if !client.Supports(FeatureTools) {
+				t.Fatal("Supports(FeatureTools) = false on API flavor")
+			}
+			response, err := client.Generate(context.Background(), Request{
+				MaxTokens:  64,
+				Messages:   []Message{User("weather?")},
+				Tools:      []Tool{weatherTool},
+				ToolChoice: ToolChoice{Mode: ToolChoiceRequired},
+			})
+			if err != nil {
+				t.Fatalf("Generate(): %v", err)
+			}
+			if response.CompletionReason != CompletionReasonToolUse {
+				t.Fatalf("completion reason = %q, want %q", response.CompletionReason, CompletionReasonToolUse)
+			}
+			if len(response.ToolCalls) != 1 {
+				t.Fatalf("tool calls = %#v", response.ToolCalls)
+			}
+			call := response.ToolCalls[0]
+			if call.ID != "call_a" || call.Name != "get_weather" || string(call.Input) != `{"city":"SF"}` {
+				t.Fatalf("normalized tool call = %#v", call)
+			}
+			if calls() != 1 {
+				t.Fatalf("transport calls = %d, want 1", calls())
+			}
+		})
+	}
+}
+
+// newContractToolTarget returns a target whose transport returns one tool call
+// named get_weather with input {"city":"SF"}. CLI flavors need no fixture: tools
+// are rejected in core before the runner is called.
+func newContractToolTarget(t *testing.T, provider Provider, flavor Flavor) (Config, core.CommandRunner, func() int) {
+	t.Helper()
+
+	config := Config{Provider: provider, Flavor: flavor, Model: "contract-model"}
+	var calls atomic.Int32
+	callCount := func() int { return int(calls.Load()) }
+
+	if flavor == FlavorCLI {
+		run := func(ctx context.Context, name string, args []string, stdin []byte) ([]byte, []byte, int, error) {
+			calls.Add(1)
+			return nil, nil, 0, nil
+		}
+		return config, run, callCount
+	}
+
+	var response string
+	if provider == ProviderClaude {
+		response = `{"id":"c","type":"message","role":"assistant","model":"contract-model",` +
+			`"content":[{"type":"tool_use","id":"call_a","name":"get_weather","input":{"city":"SF"}}],` +
+			`"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}}`
+	} else {
+		response = `{"id":"c","object":"response","status":"completed","model":"contract-model",` +
+			`"output":[{"id":"fc","type":"function_call","status":"completed","call_id":"call_a","name":"get_weather","arguments":"{\"city\":\"SF\"}"}],` +
+			`"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, response)
+	}))
+	t.Cleanup(server.Close)
+	config.APIKey = "contract-key"
+	config.BaseURL = server.URL
+	return config, nil, callCount
+}
+
 func newContractStructuredTarget(t *testing.T, provider Provider, flavor Flavor) (Config, core.CommandRunner) {
 	t.Helper()
 
