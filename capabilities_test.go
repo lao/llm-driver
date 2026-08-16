@@ -157,7 +157,7 @@ func wantSupport(mt matrixTarget, feature Feature) bool {
 	switch feature {
 	case FeatureStructuredOutput, FeatureReasoningEffort:
 		return true
-	case FeatureSamplingParams, FeatureUserID:
+	case FeatureTools, FeatureSamplingParams, FeatureUserID:
 		return mt.flavor == FlavorAPI
 	case FeatureTopK, FeatureStopSequences:
 		return mt.provider == ProviderClaude && mt.flavor == FlavorAPI

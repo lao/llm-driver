@@ -88,6 +88,7 @@ var featureSupport = map[target]map[Feature]map[Effort]bool{
 	{ProviderClaude, FlavorAPI}: {
 		FeatureStructuredOutput: {},
 		FeatureReasoningEffort:  effortFull,
+		FeatureTools:            {},
 		FeatureSamplingParams:   {},
 		FeatureTopK:             {},
 		FeatureStopSequences:    {},
@@ -100,6 +101,7 @@ var featureSupport = map[target]map[Feature]map[Effort]bool{
 	{ProviderOpenAI, FlavorAPI}: {
 		FeatureStructuredOutput: {},
 		FeatureReasoningEffort:  effortToHigh,
+		FeatureTools:            {},
 		FeatureSamplingParams:   {},
 		FeatureUserID:           {},
 	},
@@ -133,6 +135,9 @@ func featuresOf(r Request) []Feature {
 	if r.Effort != "" {
 		features = append(features, FeatureReasoningEffort)
 	}
+	if len(r.Tools) > 0 || r.ToolChoice.Mode != ToolChoiceAuto || requestUsesParts(r) {
+		features = append(features, FeatureTools)
+	}
 	if r.Temperature != nil || r.TopP != nil {
 		features = append(features, FeatureSamplingParams)
 	}
@@ -146,6 +151,20 @@ func featuresOf(r Request) []Feature {
 		features = append(features, FeatureUserID)
 	}
 	return features
+}
+
+// requestUsesParts reports whether any message uses the Parts content form,
+// which requires tool support even without Tools or a non-auto ToolChoice. Any
+// Parts usage counts, not just tool parts: a target that cannot render Parts
+// (the CLI flavors) must reject the request loudly rather than silently drop
+// the content that only lives in Parts.
+func requestUsesParts(r Request) bool {
+	for _, message := range r.Messages {
+		if len(message.Parts) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateRequestFor reports whether the target accepts every feature the

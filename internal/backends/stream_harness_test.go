@@ -119,7 +119,11 @@ func (s *testStream) Next() bool {
 			continue
 		}
 		s.current = chunk
-		s.text.WriteString(chunk.Text)
+		// Mirror the root Stream: only text deltas build Response.Text; tool-input
+		// deltas are surfaced via Current but must not pollute the response text.
+		if chunk.Kind == core.KindText {
+			s.text.WriteString(chunk.Text)
+		}
 		return true
 	}
 }

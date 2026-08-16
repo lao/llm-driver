@@ -36,7 +36,8 @@ func TestParseOptionsBuildsConfigAndRequest(t *testing.T) {
 		Messages:  []llmdriver.Message{llmdriver.User("Say hello")},
 		MaxTokens: 256,
 	})
-	if len(parsed.request.Messages) != 1 || parsed.request.Messages[0] != wantRequest.Messages[0] || parsed.request.MaxTokens != wantRequest.MaxTokens {
+	got := parsed.request.Messages
+	if len(got) != 1 || got[0].Role != wantRequest.Messages[0].Role || got[0].Text != wantRequest.Messages[0].Text || parsed.request.MaxTokens != wantRequest.MaxTokens {
 		t.Fatalf("request = %+v, want %+v", parsed.request, wantRequest)
 	}
 }
