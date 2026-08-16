@@ -43,7 +43,11 @@ func (b *openAIBackend) Generate(ctx context.Context, request core.Request) (*co
 	if err := validateOpenAIResponse(response, "generate"); err != nil {
 		return nil, err
 	}
-	return openAIResponse(response), nil
+	result := openAIResponse(response)
+	if err := setStructuredOutput(result, request.OutputSchema, core.ProviderOpenAI, core.FlavorAPI, "generate"); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (b *openAIBackend) GenerateStream(ctx context.Context, request core.Request) (core.ChunkStream, error) {
@@ -54,7 +58,7 @@ func (b *openAIBackend) GenerateStream(ctx context.Context, request core.Request
 		_ = stream.Close()
 		return nil, normalizeOpenAIError(err, "generate_stream")
 	}
-	return &openAIChunkStream{stream: stream}, nil
+	return &openAIChunkStream{stream: stream, schema: request.OutputSchema}, nil
 }
 
 func (b *openAIBackend) params(request core.Request) responses.ResponseNewParams {
@@ -85,6 +89,17 @@ func (b *openAIBackend) params(request core.Request) responses.ResponseNewParams
 	if request.System != "" {
 		params.Instructions = openai.String(request.System)
 	}
+	if request.OutputSchema != nil {
+		// Validated in core, so SchemaObject cannot fail here.
+		schema, _ := request.OutputSchema.SchemaObject()
+		name := request.OutputSchema.Name
+		if name == "" {
+			name = "response"
+		}
+		format := responses.ResponseFormatTextConfigParamOfJSONSchema(name, schema)
+		format.OfJSONSchema.Strict = openai.Bool(true)
+		params.Text = responses.ResponseTextConfigParam{Format: format}
+	}
 	return params
 }
 
@@ -92,6 +107,7 @@ func (b *openAIBackend) params(request core.Request) responses.ResponseNewParams
 // keeps the completed response event for finish.
 type openAIChunkStream struct {
 	stream    *ssestream.Stream[responses.ResponseStreamEventUnion]
+	schema    *core.OutputSchema
 	completed *responses.Response
 }
 
@@ -127,7 +143,13 @@ func (s *openAIChunkStream) Finish() (*core.Response, error) {
 	if err := validateOpenAIResponse(s.completed, "generate_stream"); err != nil {
 		return nil, err
 	}
-	return openAIResponse(s.completed), nil
+	response := openAIResponse(s.completed)
+	// The completed response's output text equals the concatenated deltas the
+	// root Stream reports, so StructuredOutput comes from the same bytes.
+	if err := setStructuredOutput(response, s.schema, core.ProviderOpenAI, core.FlavorAPI, "generate_stream"); err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
 func (s *openAIChunkStream) Close() error {

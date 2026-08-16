@@ -2,10 +2,19 @@ package llmdriver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"testing"
 )
+
+// structuredSchema is the JSON Schema every structured-output test sends, and
+// structuredJSON is the JSON document the model returns for it. They are shared
+// so the contract tests can assert an identical normalized shape across targets.
+var structuredSchema = json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`)
+
+const structuredJSON = `{"answer":"42"}`
 
 func TestAnthropicGenerateNormalizesAPIError(t *testing.T) {
 	t.Parallel()
@@ -139,6 +148,10 @@ func TestAnthropicGenerateMapsRequestAndResponse(t *testing.T) {
 	if system["text"] != "Be concise." {
 		t.Fatalf("system = %#v", system)
 	}
+	// Backward compat: no OutputSchema => no output_config in the request body.
+	if _, ok := captured.body["output_config"]; ok {
+		t.Fatalf("output_config present without OutputSchema: %#v", captured.body["output_config"])
+	}
 
 	if result.ID != "msg_123" || result.Model != "claude-test" || result.Text != "Hello, world" {
 		t.Fatalf("response = %+v", result)
@@ -152,5 +165,90 @@ func TestAnthropicGenerateMapsRequestAndResponse(t *testing.T) {
 	wantUsage := Usage{InputTokens: 10, OutputTokens: 5, CachedInputTokens: 3, CacheCreationInputTokens: 2}
 	if result.Usage != wantUsage {
 		t.Fatalf("usage = %+v, want %+v", result.Usage, wantUsage)
+	}
+}
+
+func TestAnthropicGenerateStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	// The model returns the JSON document as its response text.
+	response := `{"id":"msg_s","type":"message","role":"assistant","model":"claude-test",` +
+		`"content":[{"type":"text","text":` + strconv.Quote(structuredJSON) + `}],` +
+		`"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}`
+	server, captured := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{
+		Provider: ProviderClaude,
+		Flavor:   FlavorAPI,
+		Model:    "claude-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	result, err := client.Generate(context.Background(), Request{
+		MaxTokens:    64,
+		Messages:     []Message{User("q")},
+		OutputSchema: &OutputSchema{Name: "answer", Schema: structuredSchema},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	// Request maps to output_config.format json_schema carrying the schema object.
+	outputConfig, ok := captured.body["output_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("output_config = %#v", captured.body["output_config"])
+	}
+	format, ok := outputConfig["format"].(map[string]any)
+	if !ok || format["type"] != "json_schema" {
+		t.Fatalf("output_config.format = %#v", outputConfig["format"])
+	}
+	schema, ok := format["schema"].(map[string]any)
+	if !ok || schema["type"] != "object" {
+		t.Fatalf("output_config.format.schema = %#v", format["schema"])
+	}
+
+	// Text keeps the raw output; StructuredOutput carries the JSON-validated bytes.
+	if result.Text != structuredJSON {
+		t.Fatalf("Text = %q, want %q", result.Text, structuredJSON)
+	}
+	if string(result.StructuredOutput) != structuredJSON {
+		t.Fatalf("StructuredOutput = %q, want %q", result.StructuredOutput, structuredJSON)
+	}
+}
+
+func TestAnthropicGenerateStructuredOutputRejectsNonJSON(t *testing.T) {
+	t.Parallel()
+
+	response := `{"id":"msg_s","type":"message","role":"assistant","model":"claude-test",` +
+		`"content":[{"type":"text","text":"not json"}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}`
+	server, _ := newAPITestServer(t, http.StatusOK, response)
+	client, err := New(Config{
+		Provider: ProviderClaude,
+		Flavor:   FlavorAPI,
+		Model:    "claude-test",
+		APIKey:   "test-key",
+		BaseURL:  server.URL,
+	})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	_, err = client.Generate(context.Background(), Request{
+		MaxTokens:    64,
+		Messages:     []Message{User("q")},
+		OutputSchema: &OutputSchema{Name: "answer", Schema: structuredSchema},
+	})
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("Generate() error = %T %v, want *Error", err, err)
+	}
+	if target.Provider != ProviderClaude || target.Flavor != FlavorAPI || target.Operation != "generate" {
+		t.Fatalf("error context = %+v", target)
+	}
+	if target.Code != "invalid_structured_output" {
+		t.Fatalf("code = %q, want invalid_structured_output", target.Code)
 	}
 }

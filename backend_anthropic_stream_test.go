@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -90,6 +91,51 @@ func TestAnthropicStreamMapsDeltasAndResponse(t *testing.T) {
 	wantUsage := Usage{InputTokens: 10, OutputTokens: 5, CachedInputTokens: 3, CacheCreationInputTokens: 2}
 	if response.Usage != wantUsage {
 		t.Fatalf("usage = %+v, want %+v", response.Usage, wantUsage)
+	}
+}
+
+func TestAnthropicStreamStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	// The JSON document arrives as raw text deltas; StructuredOutput is populated
+	// at Finish from the accumulated text.
+	textDelta := func(text string) string {
+		return "event: content_block_delta\n" +
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":` + strconv.Quote(text) + `}}` + "\n\n"
+	}
+	events := []string{
+		anthropicSSEEvents()[0],
+		anthropicSSEEvents()[1],
+		textDelta(`{"answer":`),
+		textDelta(`"42"}`),
+		anthropicSSEEvents()[4],
+		anthropicSSEEvents()[5],
+		anthropicSSEEvents()[6],
+	}
+
+	client, _ := newAnthropicStreamClient(t, http.StatusOK, events)
+	stream, err := client.GenerateStream(context.Background(), Request{
+		MaxTokens:    64,
+		Messages:     []Message{User("q")},
+		OutputSchema: &OutputSchema{Name: "answer", Schema: structuredSchema},
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+
+	chunks, err, response := collectStream(t, stream)
+	if err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	if strings.Join(chunks, "") != structuredJSON {
+		t.Fatalf("chunks = %#v, want the JSON document", chunks)
+	}
+	if response.Text != structuredJSON {
+		t.Fatalf("Text = %q, want %q", response.Text, structuredJSON)
+	}
+	if string(response.StructuredOutput) != structuredJSON {
+		t.Fatalf("StructuredOutput = %q, want %q", response.StructuredOutput, structuredJSON)
 	}
 }
 

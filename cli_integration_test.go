@@ -4,6 +4,7 @@ package llmdriver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -105,6 +106,26 @@ func runCLIIntegrationSmoke(t *testing.T, provider Provider, binary, modelEnv st
 	if streamResponse.Text != streamed.String() {
 		t.Fatalf("%s CLI stream response text = %q, want the concatenated chunks %q",
 			binary, streamResponse.Text, streamed.String())
+	}
+
+	// Structured output adds the schema flag (--json-schema for claude,
+	// --output-schema for codex). A live call surfaces flag drift here rather
+	// than at runtime, and confirms the model returns a JSON document.
+	schemaRequest := Request{
+		System:    "Reply only with the JSON document.",
+		MaxTokens: 128,
+		Messages:  []Message{User(`Return {"ready": true}.`)},
+		OutputSchema: &OutputSchema{
+			Name:   "readiness",
+			Schema: json.RawMessage(`{"type":"object","properties":{"ready":{"type":"boolean"}},"required":["ready"],"additionalProperties":false}`),
+		},
+	}
+	schemaResponse, err := client.Generate(ctx, schemaRequest)
+	if err != nil {
+		reportCLIFailure(t, binary, "Generate(schema)", err)
+	}
+	if !json.Valid(schemaResponse.StructuredOutput) {
+		t.Fatalf("%s CLI structured output is not valid JSON: %q", binary, schemaResponse.StructuredOutput)
 	}
 }
 

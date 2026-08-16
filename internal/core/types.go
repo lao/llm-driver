@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -23,6 +24,26 @@ type Message struct {
 	Text string `json:"text"`
 }
 
+// OutputSchema constrains a response to a JSON document matching a JSON Schema.
+type OutputSchema struct {
+	// Name labels the schema. It is required by the openai mapping and defaulted
+	// when empty; other targets ignore it.
+	Name string `json:"name,omitempty"`
+	// Schema is the JSON Schema, which must be a JSON object.
+	Schema json.RawMessage `json:"schema"`
+}
+
+// SchemaObject parses Schema as the JSON object every target's structured-output
+// parameter requires. Request validation rejects a non-object schema, so adapters
+// may call it on a validated request and treat an error as impossible.
+func (s OutputSchema) SchemaObject() (map[string]any, error) {
+	var object map[string]any
+	if err := json.Unmarshal(s.Schema, &object); err != nil || object == nil {
+		return nil, fmt.Errorf("%w: OutputSchema.Schema must be a JSON object", ErrInvalidRequest)
+	}
+	return object, nil
+}
+
 // Request is a provider-neutral text generation request.
 type Request struct {
 	// System is an optional instruction applied to the request.
@@ -32,6 +53,9 @@ type Request struct {
 	// MaxTokens is required and enforced by API flavors. CLI flavors validate
 	// it for request portability but cannot reliably enforce it.
 	MaxTokens int `json:"max_tokens"`
+	// OutputSchema optionally constrains the response to a JSON document matching
+	// a JSON Schema; the result is exposed on Response.StructuredOutput.
+	OutputSchema *OutputSchema `json:"output_schema,omitempty"`
 }
 
 // Usage reports token counts made available by a target.
@@ -72,6 +96,9 @@ type Response struct {
 	Usage Usage `json:"usage"`
 	// CompletionReason describes why generation ended, when reported.
 	CompletionReason CompletionReason `json:"completion_reason,omitempty"`
+	// StructuredOutput is the JSON document produced when OutputSchema was set,
+	// validated as JSON. Text keeps the raw model output.
+	StructuredOutput json.RawMessage `json:"structured_output,omitempty"`
 	// Provider identifies the selected provider.
 	Provider Provider `json:"provider"`
 	// Flavor identifies the selected transport flavor.
@@ -107,6 +134,11 @@ func (r Request) validate() error {
 		}
 		if strings.TrimSpace(message.Text) == "" {
 			return fmt.Errorf("%w: message %d text is required", ErrInvalidRequest, i)
+		}
+	}
+	if r.OutputSchema != nil {
+		if _, err := r.OutputSchema.SchemaObject(); err != nil {
+			return err
 		}
 	}
 	return nil

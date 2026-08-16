@@ -173,6 +173,52 @@ func TestClaudeCLIStreamDeliversChunksBeforeExit(t *testing.T) {
 	}
 }
 
+func TestClaudeCLIStreamStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	// Deltas carry the JSON document as raw text; StructuredOutput is populated
+	// at Finish from the result line.
+	lines := []string{
+		`{"type":"system","subtype":"init","session_id":"session-123"}`,
+		`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{\"answer\":"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\"42\"}"}}}`,
+		`{"type":"result","subtype":"success","result":"{\"answer\":\"42\"}","session_id":"session-123"}`,
+	}
+	runner := &fakeStreamingRunner{lines: lines}
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderClaude,
+		Flavor:   core.FlavorCLI,
+		Model:    "claude-test",
+	}, runner.run)
+
+	stream, err := client.GenerateStream(context.Background(), core.Request{
+		MaxTokens:    32,
+		Messages:     []core.Message{core.User("q")},
+		OutputSchema: &core.OutputSchema{Name: "answer", Schema: testSchema},
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+
+	chunks, err, response := collectStream(t, stream)
+	if err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	runner.assertCall(t, "claude", []string{
+		"-p", "--output-format", "stream-json", "--include-partial-messages", "--verbose",
+		"--permission-mode", "default", "--model", "claude-test",
+		"--json-schema", string(testSchema),
+	}, "q")
+	if strings.Join(chunks, "") != testJSON {
+		t.Fatalf("chunks = %#v, want the JSON document", chunks)
+	}
+	if response.Text != testJSON || string(response.StructuredOutput) != testJSON {
+		t.Fatalf("response Text=%q StructuredOutput=%q, want %q", response.Text, response.StructuredOutput, testJSON)
+	}
+}
+
 func TestClaudeCLIStreamErrors(t *testing.T) {
 	t.Parallel()
 

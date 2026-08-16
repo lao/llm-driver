@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync/atomic"
 	"testing"
 
@@ -83,6 +84,80 @@ func TestContractGenerateAcrossFourTargets(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestContractStructuredOutputAcrossFourTargets sends the same OutputSchema
+// request to all four targets and asserts an identical normalized shape: Text is
+// the raw JSON and StructuredOutput is the same validated bytes, regardless of
+// how each target maps the schema.
+func TestContractStructuredOutputAcrossFourTargets(t *testing.T) {
+	t.Parallel()
+
+	for _, target := range contractTargets() {
+		t.Run(string(target.provider)+"/"+string(target.flavor), func(t *testing.T) {
+			t.Parallel()
+
+			config, runner := newContractStructuredTarget(t, target.provider, target.flavor)
+			client, err := newClient(config, runner)
+			if err != nil {
+				t.Fatalf("New(): %v", err)
+			}
+
+			response, err := client.Generate(context.Background(), Request{
+				MaxTokens:    64,
+				Messages:     []Message{User("q")},
+				OutputSchema: &OutputSchema{Name: "answer", Schema: structuredSchema},
+			})
+			if err != nil {
+				t.Fatalf("Generate(): %v", err)
+			}
+			if response.Text != structuredJSON {
+				t.Fatalf("Text = %q, want %q", response.Text, structuredJSON)
+			}
+			if string(response.StructuredOutput) != structuredJSON {
+				t.Fatalf("StructuredOutput = %q, want %q", response.StructuredOutput, structuredJSON)
+			}
+			if !client.Supports(FeatureStructuredOutput) {
+				t.Fatal("Supports(FeatureStructuredOutput) = false")
+			}
+		})
+	}
+}
+
+func newContractStructuredTarget(t *testing.T, provider Provider, flavor Flavor) (Config, core.CommandRunner) {
+	t.Helper()
+
+	config := Config{Provider: provider, Flavor: flavor, Model: "contract-model"}
+	if flavor == FlavorCLI {
+		runner := &fakeCommandRunner{}
+		if provider == ProviderClaude {
+			runner.stdout = []byte(`{"type":"result","subtype":"success","result":` + strconv.Quote(structuredJSON) + `,"session_id":"s"}`)
+		} else {
+			runner.stdout = []byte(`{"type":"thread.started","thread_id":"t"}` + "\n" +
+				`{"type":"item.completed","item":{"id":"m","type":"agent_message","text":` + strconv.Quote(structuredJSON) + `}}` + "\n" +
+				`{"type":"turn.completed","usage":{}}` + "\n")
+		}
+		return config, runner.run
+	}
+
+	var response string
+	if provider == ProviderClaude {
+		response = `{"id":"c","type":"message","role":"assistant","model":"contract-model",` +
+			`"content":[{"type":"text","text":` + strconv.Quote(structuredJSON) + `}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+	} else {
+		response = `{"id":"c","object":"response","status":"completed","model":"contract-model",` +
+			`"output":[{"id":"m","type":"message","status":"completed","role":"assistant",` +
+			`"content":[{"type":"output_text","text":` + strconv.Quote(structuredJSON) + `,"annotations":[],"logprobs":[]}]}],` +
+			`"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, response)
+	}))
+	t.Cleanup(server.Close)
+	config.APIKey = "contract-key"
+	config.BaseURL = server.URL
+	return config, nil
 }
 
 func TestContractTargetMatrix(t *testing.T) {

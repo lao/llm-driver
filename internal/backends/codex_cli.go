@@ -7,11 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/lao/llm-driver/internal/core"
 )
+
+// schemaTempDir is the directory Codex schema temp files are written to. Empty
+// selects os.TempDir; tests override it to assert the files are always removed.
+var schemaTempDir string
 
 const maxCodexEventSize = 16 << 20
 
@@ -52,7 +58,11 @@ func newCodexCLIBackend(config cliBackendConfig) *codexCLIBackend {
 // cli_integration_test.go launches the real binary to surface flag drift
 // against the installed `codex` version.
 func (b *codexCLIBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
-	args := b.commandArgs(request)
+	args, cleanup, err := b.commandArgs(request, "generate")
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
 
 	stdout, err := executeCLI(
 		ctx,
@@ -74,10 +84,21 @@ func (b *codexCLIBackend) Generate(ctx context.Context, request core.Request) (*
 		}
 		return nil, err
 	}
-	return parseCodexCLIOutput(stdout, b.model)
+	response, err := parseCodexCLIOutput(stdout, b.model)
+	if err != nil {
+		return nil, err
+	}
+	if err := setStructuredOutput(response, request.OutputSchema, core.ProviderOpenAI, core.FlavorCLI, "generate"); err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
-func (b *codexCLIBackend) commandArgs(request core.Request) []string {
+// commandArgs builds the argv and a cleanup func the caller must run once the
+// process has exited. When a schema is requested it is written to a 0600 temp
+// file passed via --output-schema, and cleanup removes that file; otherwise
+// cleanup is a no-op. Cleanup is idempotent.
+func (b *codexCLIBackend) commandArgs(request core.Request, operation string) ([]string, func(), error) {
 	args := []string{
 		"exec",
 		"--json",
@@ -88,25 +109,79 @@ func (b *codexCLIBackend) commandArgs(request core.Request) []string {
 	if request.System != "" {
 		args = append(args, "--config", codexDeveloperInstructions(request.System))
 	}
+	cleanup := func() {}
+	if request.OutputSchema != nil {
+		path, remove, err := writeSchemaFile(request.OutputSchema, operation)
+		if err != nil {
+			return nil, nil, err
+		}
+		cleanup = remove
+		args = append(args, "--output-schema", path)
+	}
 	args = append(args, b.args...)
-	return append(args, "-")
+	return append(args, "-"), cleanup, nil
+}
+
+// writeSchemaFile writes the schema to a 0600 temp file (os.CreateTemp's default
+// mode) and returns its path plus an idempotent remover. A partial file is
+// removed before returning an error, so no path leaks on the failure path.
+func writeSchemaFile(schema *core.OutputSchema, operation string) (string, func(), error) {
+	file, err := os.CreateTemp(schemaTempDir, "llmdriver-schema-*.json")
+	if err != nil {
+		return "", nil, codexCLIParseError(operation, fmt.Errorf("create schema temp file: %w", err))
+	}
+	remove := sync.OnceFunc(func() { _ = os.Remove(file.Name()) })
+	if _, err := file.Write(compactSchema(schema)); err != nil {
+		_ = file.Close()
+		remove()
+		return "", nil, codexCLIParseError(operation, fmt.Errorf("write schema temp file: %w", err))
+	}
+	if err := file.Close(); err != nil {
+		remove()
+		return "", nil, codexCLIParseError(operation, fmt.Errorf("close schema temp file: %w", err))
+	}
+	return file.Name(), remove, nil
+}
+
+// cleanupProcess wraps a cliProcess so the streaming path removes the schema
+// temp file when the stream is closed, matching the batch path's defer.
+type cleanupProcess struct {
+	cliProcess
+	cleanup func()
+}
+
+func (p *cleanupProcess) close() error {
+	err := p.cliProcess.close()
+	p.cleanup()
+	return err
 }
 
 // GenerateStream reuses the batch invocation and parses the same JSONL events
 // as they arrive instead of after the process exits.
 func (b *codexCLIBackend) GenerateStream(ctx context.Context, request core.Request) (core.ChunkStream, error) {
+	args, cleanup, err := b.commandArgs(request, "generate_stream")
+	if err != nil {
+		return nil, err
+	}
 	process, err := startCLIStream(
 		ctx,
 		core.ProviderOpenAI,
 		b.path,
-		b.commandArgs(request),
+		args,
 		[]byte(renderTranscript(request.Messages)),
 		b.streamRunner,
 	)
 	if err != nil {
+		// The process never started, so remove the schema temp file now rather
+		// than waiting for a Close that will not come.
+		cleanup()
 		return nil, err
 	}
-	return newCLIChunkStream(core.ProviderOpenAI, process, &codexCLIStreamParser{model: b.model}), nil
+	return newCLIChunkStream(
+		core.ProviderOpenAI,
+		&cleanupProcess{cliProcess: process, cleanup: cleanup},
+		&codexCLIStreamParser{model: b.model, schema: request.OutputSchema},
+	), nil
 }
 
 // codexCLIStreamParser tolerates both Codex CLI shapes: versions that publish
@@ -115,6 +190,7 @@ func (b *codexCLIBackend) GenerateStream(ctx context.Context, request core.Reque
 // an increment, so text is never emitted twice.
 type codexCLIStreamParser struct {
 	model           string
+	schema          *core.OutputSchema
 	result          core.Response
 	emitted         map[string]int
 	completed       bool
@@ -142,6 +218,10 @@ func (p *codexCLIStreamParser) event(line []byte) (string, error) {
 		}
 		if event.Type == "item.completed" {
 			p.hasFinalMessage = true
+			// The completed item carries the full text, which equals the
+			// concatenated deltas; keep it so response() can validate structured
+			// output even though the root Stream sets the reported Text.
+			p.result.Text = event.Item.Text
 		}
 		seen := p.emitted[event.Item.ID]
 		if event.Delta != "" {
@@ -178,6 +258,9 @@ func (p *codexCLIStreamParser) response() (*core.Response, error) {
 	}
 	response := p.result
 	response.Model = p.model
+	if err := setStructuredOutput(&response, p.schema, core.ProviderOpenAI, core.FlavorCLI, "generate_stream"); err != nil {
+		return nil, err
+	}
 	return &response, nil
 }
 

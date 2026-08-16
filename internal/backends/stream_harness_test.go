@@ -2,6 +2,7 @@ package backends
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -10,6 +11,12 @@ import (
 
 	"github.com/lao/llm-driver/internal/core"
 )
+
+// testSchema and testJSON are the shared structured-output fixtures: the JSON
+// Schema a request sends and the JSON document the model returns for it.
+var testSchema = json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`)
+
+const testJSON = `{"answer":"42"}`
 
 // streamClient injects a fake streaming runner into a CLI backend without a
 // public seam, mirroring what the root Client does for the batch path. It lets

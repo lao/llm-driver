@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -97,6 +98,48 @@ func TestOpenAIStreamMapsDeltasAndResponse(t *testing.T) {
 	}
 	if response.Usage != wantUsage {
 		t.Fatalf("usage = %+v, want %+v", response.Usage, wantUsage)
+	}
+}
+
+func TestOpenAIStreamStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	delta := func(seq int, text string) string {
+		return "event: response.output_text.delta\n" +
+			`data: {"type":"response.output_text.delta","sequence_number":` + strconv.Itoa(seq) +
+			`,"item_id":"message-1","output_index":0,"content_index":0,"delta":` + strconv.Quote(text) + `,"logprobs":[]}` + "\n\n"
+	}
+	completed := `{"id":"resp_stream","object":"response","status":"completed","model":"gpt-test",` +
+		`"output":[{"id":"message-1","type":"message","status":"completed","role":"assistant",` +
+		`"content":[{"type":"output_text","text":` + strconv.Quote(structuredJSON) + `,"annotations":[],"logprobs":[]}]}],` +
+		`"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}`
+	events := []string{
+		openAISSEEvents()[0],
+		delta(1, `{"answer":`),
+		delta(2, `"42"}`),
+		"event: response.completed\n" + `data: {"type":"response.completed","sequence_number":3,"response":` + completed + "}\n\n",
+	}
+
+	client, _ := newOpenAIStreamClient(t, http.StatusOK, events)
+	stream, err := client.GenerateStream(context.Background(), Request{
+		MaxTokens:    64,
+		Messages:     []Message{User("q")},
+		OutputSchema: &OutputSchema{Name: "answer", Schema: structuredSchema},
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+
+	chunks, err, response := collectStream(t, stream)
+	if err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	if strings.Join(chunks, "") != structuredJSON {
+		t.Fatalf("chunks = %#v, want the JSON document", chunks)
+	}
+	if response.Text != structuredJSON || string(response.StructuredOutput) != structuredJSON {
+		t.Fatalf("response Text=%q StructuredOutput=%q, want %q", response.Text, response.StructuredOutput, structuredJSON)
 	}
 }
 

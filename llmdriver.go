@@ -18,6 +18,8 @@ type (
 	Message = core.Message
 	// Request is a provider-neutral text generation request.
 	Request = core.Request
+	// OutputSchema constrains a response to a JSON document matching a JSON Schema.
+	OutputSchema = core.OutputSchema
 	// Usage reports token counts made available by a target.
 	Usage = core.Usage
 	// CompletionReason describes why a generation ended, when reported.

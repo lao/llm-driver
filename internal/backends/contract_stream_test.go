@@ -190,6 +190,98 @@ func TestContractStreamTruncatedOutputAcrossFourTargets(t *testing.T) {
 	}
 }
 
+// TestContractStreamStructuredOutputAcrossFourTargets streams the same
+// OutputSchema request through all four targets: chunks stay raw JSON-text
+// deltas and every target reports the same StructuredOutput at Finish.
+func TestContractStreamStructuredOutputAcrossFourTargets(t *testing.T) {
+	t.Parallel()
+
+	for _, target := range contractStreamTargets() {
+		t.Run(string(target.provider)+"/"+string(target.flavor), func(t *testing.T) {
+			t.Parallel()
+
+			client := newContractStructuredStreamTarget(t, target.provider, target.flavor)
+			stream, err := client.GenerateStream(context.Background(), core.Request{
+				MaxTokens:    64,
+				Messages:     []core.Message{core.User("q")},
+				OutputSchema: &core.OutputSchema{Name: "answer", Schema: testSchema},
+			})
+			if err != nil {
+				t.Fatalf("GenerateStream(): %v", err)
+			}
+			defer stream.Close()
+
+			var accumulated strings.Builder
+			for stream.Next() {
+				accumulated.WriteString(stream.Current().Text)
+			}
+			if err := stream.Err(); err != nil {
+				t.Fatalf("Err(): %v", err)
+			}
+			response, err := stream.Response()
+			if err != nil {
+				t.Fatalf("Response(): %v", err)
+			}
+			if accumulated.String() != testJSON {
+				t.Fatalf("chunks = %q, want %q", accumulated.String(), testJSON)
+			}
+			if response.Text != testJSON || string(response.StructuredOutput) != testJSON {
+				t.Fatalf("response Text=%q StructuredOutput=%q, want %q", response.Text, response.StructuredOutput, testJSON)
+			}
+		})
+	}
+}
+
+func newContractStructuredStreamTarget(t *testing.T, provider core.Provider, flavor core.Flavor) *streamClient {
+	t.Helper()
+
+	config := core.Config{Provider: provider, Flavor: flavor, Model: "contract-model"}
+	if flavor == core.FlavorCLI {
+		var lines []string
+		if provider == core.ProviderClaude {
+			lines = []string{
+				`{"type":"system","subtype":"init","session_id":"contract-session"}`,
+				`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}`,
+				`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{\"answer\":"}}}`,
+				`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\"42\"}"}}}`,
+				`{"type":"result","subtype":"success","result":"{\"answer\":\"42\"}","session_id":"contract-session","usage":{"input_tokens":1,"output_tokens":1}}`,
+			}
+		} else {
+			lines = []string{
+				`{"type":"thread.started","thread_id":"contract-thread"}`,
+				`{"type":"item.updated","item":{"id":"m","type":"agent_message","text":"{\"answer\":"}}`,
+				`{"type":"item.updated","item":{"id":"m","type":"agent_message","text":"{\"answer\":\"42\"}"}}`,
+				`{"type":"item.completed","item":{"id":"m","type":"agent_message","text":"{\"answer\":\"42\"}"}}`,
+				`{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}`,
+			}
+		}
+		runner := &fakeStreamingRunner{lines: lines}
+		return newCLIStreamClient(config, runner.run)
+	}
+
+	var events []string
+	if provider == core.ProviderClaude {
+		events = []string{
+			"event: message_start\n" + `data: {"type":"message_start","message":{"id":"contract-message","type":"message","role":"assistant","model":"contract-model","content":[],"usage":{"input_tokens":1,"output_tokens":1}}}` + "\n\n",
+			"event: content_block_start\n" + `data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n",
+			"event: content_block_delta\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{\"answer\":"}}` + "\n\n",
+			"event: content_block_delta\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\"42\"}"}}` + "\n\n",
+			"event: content_block_stop\n" + `data: {"type":"content_block_stop","index":0}` + "\n\n",
+			"event: message_delta\n" + `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}` + "\n\n",
+			"event: message_stop\n" + `data: {"type":"message_stop"}` + "\n\n",
+		}
+	} else {
+		events = []string{
+			"event: response.output_text.delta\n" + `data: {"type":"response.output_text.delta","sequence_number":1,"item_id":"m","output_index":0,"content_index":0,"delta":"{\"answer\":","logprobs":[]}` + "\n\n",
+			"event: response.output_text.delta\n" + `data: {"type":"response.output_text.delta","sequence_number":2,"item_id":"m","output_index":0,"content_index":0,"delta":"\"42\"}","logprobs":[]}` + "\n\n",
+			"event: response.completed\n" + `data: {"type":"response.completed","sequence_number":3,"response":{"id":"contract-response","object":"response","status":"completed","model":"contract-model",` +
+				`"output":[{"id":"m","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"{\"answer\":\"42\"}","annotations":[],"logprobs":[]}]}],` +
+				`"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n\n",
+		}
+	}
+	return newContractAPIStreamTarget(t, config, events)
+}
+
 func contractStreamLines(provider core.Provider) []string {
 	if provider == core.ProviderClaude {
 		return []string{
