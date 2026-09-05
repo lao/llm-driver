@@ -1,10 +1,10 @@
 module github.com/lao/llm-driver
 
-go 1.24
+go 1.25.0
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.58.1
-	github.com/openai/openai-go/v3 v3.44.0
+	github.com/anthropics/anthropic-sdk-go v1.63.1
+	github.com/openai/openai-go/v3 v3.51.0
 )
 
 require (
