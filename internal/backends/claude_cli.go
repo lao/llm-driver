@@ -3,6 +3,7 @@ package backends
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -61,6 +62,22 @@ func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (
 		b.runner,
 	)
 	if err != nil {
+		// A non-zero exit whose stdout still carries a result envelope holds the
+		// real reason (`claude -p` reports "Not logged in", a provider rejection,
+		// etc. as is_error with a message on stdout, and its stderr is empty).
+		// Surface that diagnostic instead of the generic "CLI command failed",
+		// mirroring the Codex batch path. A stdout that does not decode to a
+		// result (empty output, a crash) keeps the original process error.
+		var processError *core.Error
+		if errors.As(err, &processError) && processError.Status != 0 {
+			if _, diagnosticErr := parseClaudeCLIOutput(stdout, b.model); diagnosticErr != nil {
+				var diagnostic *core.Error
+				if errors.As(diagnosticErr, &diagnostic) && diagnostic.Message != "" {
+					diagnostic.Status = processError.Status
+					return nil, diagnostic
+				}
+			}
+		}
 		return nil, err
 	}
 	response, err := parseClaudeCLIOutput(stdout, b.model)

@@ -220,6 +220,15 @@ func TestClaudeCLIErrors(t *testing.T) {
 			wantStatus: 17,
 		},
 		{
+			// `claude -p` reports a login failure as an is_error result on stdout
+			// with an empty stderr and a non-zero exit. The diagnostic on stdout
+			// must win over the generic process error so the reason is not lost.
+			name:       "nonzero exit with diagnostic on stdout",
+			runner:     &fakeCommandRunner{stdout: []byte(`{"type":"result","subtype":"success","is_error":true,"result":"Not logged in - Please run /login"}`), exitCode: 1},
+			wantStatus: 1,
+			wantCode:   "error",
+		},
+		{
 			name:   "malformed JSON",
 			runner: &fakeCommandRunner{stdout: []byte("not-json")},
 		},
