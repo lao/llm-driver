@@ -39,6 +39,7 @@ func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 		{name: "provider", config: Config{Provider: "anthropic", Flavor: FlavorAPI, Model: "model"}},
 		{name: "flavor", config: Config{Provider: ProviderClaude, Flavor: "sdk", Model: "model"}},
 		{name: "model", config: Config{Provider: ProviderClaude, Flavor: FlavorAPI, Model: "  "}},
+		{name: "whitespace CLI model", config: Config{Provider: ProviderClaude, Flavor: FlavorCLI, Model: "  "}},
 		{name: "base URL", config: Config{Provider: ProviderClaude, Flavor: FlavorAPI, Model: "model", BaseURL: "://bad"}},
 		{name: "CLI path", config: Config{Provider: ProviderClaude, Flavor: FlavorCLI, Model: "model", CLIPath: "  "}},
 		{name: "codex sandbox conflict", config: Config{Provider: ProviderOpenAI, Flavor: FlavorCLI, Model: "model", Codex: CodexOptions{SandboxMode: "workspace-write", OmitSandbox: true}}},

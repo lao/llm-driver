@@ -351,3 +351,46 @@ func TestClaudeCLIOmitsModelWhenEmpty(t *testing.T) {
 	}
 	runner.assertCall(t, "claude", []string{"-p", "--output-format", "json", "--permission-mode", "default"}, "q")
 }
+
+func TestClaudeCLICompletionReason(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		stopReason string
+		want       CompletionReason
+	}{
+		{name: "end turn", stopReason: "end_turn", want: CompletionReasonStop},
+		{name: "stop sequence", stopReason: "stop_sequence", want: CompletionReasonStop},
+		{name: "max tokens", stopReason: "max_tokens", want: CompletionReasonMaxTokens},
+		{name: "refusal", stopReason: "refusal", want: CompletionReasonRefusal},
+		{name: "tool use", stopReason: "tool_use", want: CompletionReasonToolUse},
+		{name: "unknown", stopReason: "something_new", want: ""},
+		{name: "absent", stopReason: "", want: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			stdout := `{"type":"result","subtype":"success","result":"ok"`
+			if test.stopReason != "" {
+				stdout += `,"stop_reason":"` + test.stopReason + `"`
+			}
+			stdout += "}"
+
+			runner := &fakeCommandRunner{stdout: []byte(stdout)}
+			client, err := newClient(Config{Provider: ProviderClaude, Flavor: FlavorCLI, Model: "claude-test"}, runner.run)
+			if err != nil {
+				t.Fatalf("New(): %v", err)
+			}
+			response, err := client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}})
+			if err != nil {
+				t.Fatalf("Generate(): %v", err)
+			}
+			if response.CompletionReason != test.want {
+				t.Fatalf("CompletionReason = %q, want %q", response.CompletionReason, test.want)
+			}
+		})
+	}
+}

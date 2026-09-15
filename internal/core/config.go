@@ -109,6 +109,9 @@ func (c Config) validate() error {
 	if c.Flavor == FlavorAPI && strings.TrimSpace(c.Model) == "" {
 		return fmt.Errorf("%w: model is required", ErrInvalidConfig)
 	}
+	if c.Model != "" && strings.TrimSpace(c.Model) == "" {
+		return fmt.Errorf("%w: model cannot be whitespace", ErrInvalidConfig)
+	}
 	if c.Flavor == FlavorAPI && c.BaseURL != "" {
 		u, err := url.Parse(c.BaseURL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {

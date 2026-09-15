@@ -292,17 +292,21 @@ func claudeCLIResponse(result claudeCLIResult, model string, operation string) (
 	}, nil
 }
 
-// claudeCompletionReason maps the CLI's stop_reason to the neutral enum.
+// claudeCompletionReason maps the CLI's stop_reason to the neutral enum,
+// matching normalizeAnthropicCompletionReason: only explicitly known reasons
+// map, and an unrecognized one stays the zero value rather than guessing.
 func claudeCompletionReason(stopReason string) core.CompletionReason {
 	switch stopReason {
-	case "refusal":
-		return core.CompletionReasonRefusal
+	case "end_turn", "stop_sequence":
+		return core.CompletionReasonStop
 	case "max_tokens":
 		return core.CompletionReasonMaxTokens
-	case "":
-		return ""
+	case "refusal":
+		return core.CompletionReasonRefusal
+	case "tool_use":
+		return core.CompletionReasonToolUse
 	default:
-		return core.CompletionReasonStop
+		return ""
 	}
 }
 
