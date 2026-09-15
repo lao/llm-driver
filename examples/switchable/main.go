@@ -126,6 +126,9 @@ func parseOptions(args []string, output io.Writer) (parsedOptions, error) {
 	if err != nil {
 		return parsedOptions{}, err
 	}
+	if provider == llmdriver.ProviderOpenCode && flavor != llmdriver.FlavorCLI {
+		return parsedOptions{}, errors.New("opencode provider supports only --flavor cli")
+	}
 	if strings.TrimSpace(*model) == "" {
 		return parsedOptions{}, errors.New("--model is required")
 	}

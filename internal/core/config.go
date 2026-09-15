@@ -60,6 +60,9 @@ func (c Config) validate() error {
 	if c.Flavor != FlavorAPI && c.Flavor != FlavorCLI {
 		return fmt.Errorf("%w: flavor must be %q or %q", ErrInvalidConfig, FlavorAPI, FlavorCLI)
 	}
+	if c.Provider == ProviderOpenCode && c.Flavor != FlavorCLI {
+		return fmt.Errorf("%w: opencode only supports the CLI flavor", ErrInvalidConfig)
+	}
 	if strings.TrimSpace(c.Model) == "" {
 		return fmt.Errorf("%w: model is required", ErrInvalidConfig)
 	}

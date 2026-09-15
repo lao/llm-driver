@@ -59,6 +59,20 @@ func TestParseOptionsAcceptsOpenCode(t *testing.T) {
 	}
 }
 
+func TestParseOptionsRejectsOpenCodeAPIFlavor(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseOptions([]string{
+		"--provider", "opencode",
+		"--flavor", "api",
+		"--model", "model",
+		"--prompt", "hello",
+	}, new(strings.Builder))
+	if err == nil || err.Error() != "opencode provider supports only --flavor cli" {
+		t.Fatalf("parseOptions() error = %v, want opencode provider supports only --flavor cli", err)
+	}
+}
+
 func TestParseOptionsUsesDocumentedTokenDefault(t *testing.T) {
 	t.Parallel()
 
