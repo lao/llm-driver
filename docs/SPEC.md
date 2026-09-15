@@ -6,8 +6,18 @@ Supersedes the streaming spec (shipped; see git history of this file).
 
 Bring `llm-driver` to feature parity with the official SDKs' *generation*
 surface — the capabilities of a single `messages.create` (Anthropic) /
-`responses.create` (OpenAI) call — across all four existing targets, without
+`responses.create` (OpenAI) call — across all existing targets, without
 breaking the current public API.
+
+An `opencode` provider (`cli` flavor) joined the target set after the phases
+below: the local `opencode run` CLI, which fronts many upstream providers. It
+carries the same generation surface as the other CLI targets (baseline plus
+structured output and reasoning effort). Because `opencode run` has no
+JSON-schema flag, its structured output states the schema in the prompt and
+validates the returned document, failing `invalid_structured_output` on a
+non-JSON answer. `ListModels` runs `opencode models` to discover the
+`provider/model` ids the installed opencode can use, and `Config.Model` accepts
+any such id.
 
 Scope decision (approved): **generation parity only.** Platform APIs that a
 CLI can never serve (embeddings, batches, files CRUD, audio, images

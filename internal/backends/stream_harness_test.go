@@ -37,10 +37,13 @@ func newCLIStreamClient(config core.Config, runner streamingCommandRunner) *stre
 		streamRunner: runner,
 	}
 	var target core.Backend
-	if config.Provider == core.ProviderClaude {
+	switch config.Provider {
+	case core.ProviderClaude:
 		target = newClaudeCLIBackend(cliConfig)
-	} else {
+	case core.ProviderOpenAI:
 		target = newCodexCLIBackend(cliConfig)
+	default:
+		target = newOpenCodeCLIBackend(cliConfig)
 	}
 	return &streamClient{
 		provider: config.Provider,

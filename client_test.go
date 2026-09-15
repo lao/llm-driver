@@ -20,19 +20,38 @@ func (f *fakeGenerationBackend) Generate(_ context.Context, request Request) (*R
 	return f.response, f.err
 }
 
-func TestClientNewAcceptsFourTargets(t *testing.T) {
+func TestClientNewAcceptsSupportedTargets(t *testing.T) {
 	t.Parallel()
 
-	for _, provider := range []Provider{ProviderClaude, ProviderOpenAI} {
-		for _, flavor := range []Flavor{FlavorAPI, FlavorCLI} {
-			client, err := New(Config{Provider: provider, Flavor: flavor, Model: "model"})
-			if err != nil {
-				t.Fatalf("New(%s/%s): %v", provider, flavor, err)
-			}
-			if client == nil {
-				t.Fatalf("New(%s/%s) returned nil client", provider, flavor)
-			}
+	targets := []struct {
+		provider Provider
+		flavor   Flavor
+	}{
+		{ProviderClaude, FlavorAPI},
+		{ProviderClaude, FlavorCLI},
+		{ProviderOpenAI, FlavorAPI},
+		{ProviderOpenAI, FlavorCLI},
+		{ProviderOpenCode, FlavorCLI},
+	}
+	for _, target := range targets {
+		client, err := New(Config{Provider: target.provider, Flavor: target.flavor, Model: "model"})
+		if err != nil {
+			t.Fatalf("New(%s/%s): %v", target.provider, target.flavor, err)
 		}
+		if client == nil {
+			t.Fatalf("New(%s/%s) returned nil client", target.provider, target.flavor)
+		}
+	}
+}
+
+// TestClientNewRejectsOpenCodeAPI pins the CLI-only flavor: opencode has no
+// hosted API flavor, so the combination is rejected at construction.
+func TestClientNewRejectsOpenCodeAPI(t *testing.T) {
+	t.Parallel()
+
+	_, err := New(Config{Provider: ProviderOpenCode, Flavor: FlavorAPI, Model: "model"})
+	if !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("New() error = %v, want ErrInvalidConfig", err)
 	}
 }
 

@@ -30,6 +30,7 @@ func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 		{name: "model", config: Config{Provider: ProviderClaude, Flavor: FlavorAPI, Model: "  "}},
 		{name: "base URL", config: Config{Provider: ProviderClaude, Flavor: FlavorAPI, Model: "model", BaseURL: "://bad"}},
 		{name: "CLI path", config: Config{Provider: ProviderClaude, Flavor: FlavorCLI, Model: "model", CLIPath: "  "}},
+		{name: "OpenCode API", config: Config{Provider: ProviderOpenCode, Flavor: FlavorAPI, Model: "model"}},
 	}
 
 	for _, test := range tests {

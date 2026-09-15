@@ -13,8 +13,8 @@ import (
 	"github.com/lao/llm-driver/internal/core"
 )
 
-// contractTarget is one of the four provider/flavor combinations every contract
-// test runs against.
+// contractTarget is one provider/flavor combination every contract test runs
+// against.
 type contractTarget struct {
 	provider Provider
 	flavor   Flavor
@@ -26,10 +26,11 @@ func contractTargets() []contractTarget {
 		{provider: ProviderClaude, flavor: FlavorCLI},
 		{provider: ProviderOpenAI, flavor: FlavorAPI},
 		{provider: ProviderOpenAI, flavor: FlavorCLI},
+		{provider: ProviderOpenCode, flavor: FlavorCLI},
 	}
 }
 
-func TestContractGenerateAcrossFourTargets(t *testing.T) {
+func TestContractGenerateAcrossTargets(t *testing.T) {
 	t.Parallel()
 
 	for _, target := range contractTargets() {
@@ -86,11 +87,11 @@ func TestContractGenerateAcrossFourTargets(t *testing.T) {
 	}
 }
 
-// TestContractStructuredOutputAcrossFourTargets sends the same OutputSchema
-// request to all four targets and asserts an identical normalized shape: Text is
+// TestContractStructuredOutputAcrossTargets sends the same OutputSchema
+// request to every target and asserts an identical normalized shape: Text is
 // the raw JSON and StructuredOutput is the same validated bytes, regardless of
 // how each target maps the schema.
-func TestContractStructuredOutputAcrossFourTargets(t *testing.T) {
+func TestContractStructuredOutputAcrossTargets(t *testing.T) {
 	t.Parallel()
 
 	for _, target := range contractTargets() {
@@ -124,11 +125,11 @@ func TestContractStructuredOutputAcrossFourTargets(t *testing.T) {
 	}
 }
 
-// TestContractEffortAcrossFourTargets sends a supported effort level to every
+// TestContractEffortAcrossTargets sends a supported effort level to every
 // target and asserts each maps it (the transport is reached and the call
 // succeeds), then asserts openai/api rejects an out-of-ceiling value with
 // ErrUnsupportedFeature before any transport call — values are never remapped.
-func TestContractEffortAcrossFourTargets(t *testing.T) {
+func TestContractEffortAcrossTargets(t *testing.T) {
 	t.Parallel()
 
 	for _, target := range contractTargets() {
@@ -177,12 +178,12 @@ func TestContractEffortAcrossFourTargets(t *testing.T) {
 	}
 }
 
-// TestContractSamplingParamsAcrossFourTargets asserts the Phase 4 support map:
+// TestContractSamplingParamsAcrossTargets asserts the Phase 4 support map:
 // Temperature/TopP/UserID map on both API flavors and are rejected with
 // ErrUnsupportedFeature (before any transport call) on both CLI flavors; TopK
 // and StopSequences are supported only on claude/api and rejected everywhere
 // else, including openai/api (the Responses API lacks both).
-func TestContractSamplingParamsAcrossFourTargets(t *testing.T) {
+func TestContractSamplingParamsAcrossTargets(t *testing.T) {
 	t.Parallel()
 
 	temp, topP, topK := 0.5, 0.9, 40
@@ -258,11 +259,11 @@ func TestContractSamplingParamsAcrossFourTargets(t *testing.T) {
 	}
 }
 
-// TestContractToolCallingAcrossFourTargets asserts the Phase 5 support map: both
+// TestContractToolCallingAcrossTargets asserts the Phase 5 support map: both
 // API flavors map a tool request and return an identical normalized tool call
 // with CompletionReasonToolUse, while both CLI flavors reject tools — and tool
 // content parts — with ErrUnsupportedFeature before any transport call.
-func TestContractToolCallingAcrossFourTargets(t *testing.T) {
+func TestContractToolCallingAcrossTargets(t *testing.T) {
 	t.Parallel()
 
 	weatherTool := Tool{Name: "get_weather", InputSchema: structuredSchema}
@@ -374,12 +375,15 @@ func newContractStructuredTarget(t *testing.T, provider Provider, flavor Flavor)
 	config := Config{Provider: provider, Flavor: flavor, Model: "contract-model"}
 	if flavor == FlavorCLI {
 		runner := &fakeCommandRunner{}
-		if provider == ProviderClaude {
+		switch provider {
+		case ProviderClaude:
 			runner.stdout = []byte(`{"type":"result","subtype":"success","result":` + strconv.Quote(structuredJSON) + `,"session_id":"s"}`)
-		} else {
+		case ProviderOpenAI:
 			runner.stdout = []byte(`{"type":"thread.started","thread_id":"t"}` + "\n" +
 				`{"type":"item.completed","item":{"id":"m","type":"agent_message","text":` + strconv.Quote(structuredJSON) + `}}` + "\n" +
 				`{"type":"turn.completed","usage":{}}` + "\n")
+		default:
+			runner.stdout = []byte(openCodeContractOutput(structuredJSON))
 		}
 		return config, runner.run
 	}
@@ -407,7 +411,7 @@ func newContractStructuredTarget(t *testing.T, provider Provider, flavor Flavor)
 func TestContractTargetMatrix(t *testing.T) {
 	t.Parallel()
 
-	providers := []Provider{ProviderClaude, ProviderOpenAI, "other"}
+	providers := []Provider{ProviderClaude, ProviderOpenAI, ProviderOpenCode, "other"}
 	flavors := []Flavor{FlavorAPI, FlavorCLI, "other"}
 	for _, provider := range providers {
 		for _, flavor := range flavors {
@@ -415,8 +419,9 @@ func TestContractTargetMatrix(t *testing.T) {
 				t.Parallel()
 
 				_, err := New(Config{Provider: provider, Flavor: flavor, Model: "contract-model"})
-				wantValid := (provider == ProviderClaude || provider == ProviderOpenAI) &&
-					(flavor == FlavorAPI || flavor == FlavorCLI)
+				wantValid := (provider == ProviderClaude || provider == ProviderOpenAI || provider == ProviderOpenCode) &&
+					(flavor == FlavorAPI || flavor == FlavorCLI) &&
+					!(provider == ProviderOpenCode && flavor == FlavorAPI)
 				if wantValid && err != nil {
 					t.Fatalf("New() error = %v", err)
 				}
@@ -428,6 +433,14 @@ func TestContractTargetMatrix(t *testing.T) {
 	}
 }
 
+// openCodeContractOutput renders one text event plus a terminal step_finish with
+// the usage every contract test expects.
+func openCodeContractOutput(text string) string {
+	return `{"type":"step_start","sessionID":"contract-session","part":{"id":"prt_1","type":"step-start"}}` + "\n" +
+		`{"type":"text","sessionID":"contract-session","part":{"id":"prt_2","type":"text","text":` + strconv.Quote(text) + `}}` + "\n" +
+		`{"type":"step_finish","sessionID":"contract-session","part":{"id":"prt_3","type":"step-finish","reason":"stop","tokens":{"input":12,"output":4}}}` + "\n"
+}
+
 func newContractTarget(t *testing.T, provider Provider, flavor Flavor) (Config, core.CommandRunner, func() int) {
 	t.Helper()
 
@@ -437,7 +450,8 @@ func newContractTarget(t *testing.T, provider Provider, flavor Flavor) (Config, 
 
 	if flavor == FlavorCLI {
 		runner := &fakeCommandRunner{}
-		if provider == ProviderClaude {
+		switch provider {
+		case ProviderClaude:
 			runner.stdout = []byte(`{
   "type":"result",
   "subtype":"success",
@@ -445,11 +459,13 @@ func newContractTarget(t *testing.T, provider Provider, flavor Flavor) (Config, 
   "session_id":"contract-session",
   "usage":{"input_tokens":12,"output_tokens":4}
 }`)
-		} else {
+		case ProviderOpenAI:
 			runner.stdout = []byte(`{"type":"thread.started","thread_id":"contract-thread"}
 {"type":"item.completed","item":{"id":"message-1","type":"agent_message","text":"contract answer"}}
 {"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":4}}
 `)
+		default:
+			runner.stdout = []byte(openCodeContractOutput("contract answer"))
 		}
 		run := func(ctx context.Context, name string, args []string, stdin []byte) ([]byte, []byte, int, error) {
 			calls.Add(1)

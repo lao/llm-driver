@@ -14,14 +14,15 @@ import (
 )
 
 // These smoke tests are excluded from the default offline suite and only run
-// under `go test -tags integration`. They launch the real `claude` and `codex`
-// binaries so that a renamed, removed, or invalid flag surfaces as a live
-// failure instead of silently passing every fake-runner test. Each test skips
-// when the binary is missing or when the model environment variable is unset,
-// so opting in requires a working local login.
+// under `go test -tags integration`. They launch the real `claude`, `codex`, and
+// opencode binaries so that a renamed, removed, or invalid flag surfaces as a
+// live failure instead of silently passing every fake-runner test. Each test
+// skips when the binary is missing or when the model environment variable is
+// unset, so opting in requires a working local login.
 //
-//	LLM_DRIVER_CLAUDE_CLI_MODEL   model passed to `claude -p`
-//	LLM_DRIVER_CODEX_CLI_MODEL    model passed to `codex exec`
+//	LLM_DRIVER_CLAUDE_CLI_MODEL    model passed to `claude -p`
+//	LLM_DRIVER_CODEX_CLI_MODEL     model passed to `codex exec`
+//	LLM_DRIVER_OPENCODE_CLI_MODEL  provider/model id passed to `opencode run`
 
 // unknownFlagMarkers are substrings the tested CLIs emit when they reject an
 // argument. They let the smoke tests report flag drift explicitly rather than
@@ -41,6 +42,29 @@ func TestClaudeCLIIntegration(t *testing.T) {
 
 func TestCodexCLIIntegration(t *testing.T) {
 	runCLIIntegrationSmoke(t, ProviderOpenAI, "codex", "LLM_DRIVER_CODEX_CLI_MODEL")
+}
+
+func TestOpenCodeCLIIntegration(t *testing.T) {
+	runCLIIntegrationSmoke(t, ProviderOpenCode, "opencode", "LLM_DRIVER_OPENCODE_CLI_MODEL")
+}
+
+// TestOpenCodeModelsCLIIntegration exercises ListModels against the real
+// opencode binary; it needs no model env var and skips when the CLI is absent.
+func TestOpenCodeModelsCLIIntegration(t *testing.T) {
+	if _, err := exec.LookPath("opencode"); err != nil {
+		t.Skipf("opencode CLI not installed: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	models, err := ListModels(ctx)
+	if err != nil {
+		t.Fatalf("ListModels(): %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("ListModels() returned no models")
+	}
 }
 
 func runCLIIntegrationSmoke(t *testing.T, provider Provider, binary, modelEnv string) {
