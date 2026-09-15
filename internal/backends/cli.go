@@ -111,7 +111,12 @@ func runCLI(
 	err = command.Run()
 	// Reap any background child the CLI left behind, on success as well as
 	// failure: a provider CLI that daemonizes a helper must not outlive the call.
-	reapCommandGroup(command)
+	// When the context triggered Cancel, the group was already killed before Wait
+	// returned (while the PID was still valid), so repeating after Wait would only
+	// widen the PID-reuse race window for no benefit.
+	if ctx.Err() == nil {
+		reapCommandGroup(command)
+	}
 	if err == nil {
 		return stdout.Bytes(), stderr.Bytes(), 0, nil
 	}
@@ -255,7 +260,10 @@ func (p *execCLIProcess) stdout() io.Reader {
 func (p *execCLIProcess) wait() (int, []byte, error) {
 	p.waitOnce.Do(func() {
 		p.waitErr = p.command.Wait()
-		reapCommandGroup(p.command)
+		// Only reap when Cancel has not already killed the group—see runCLI.
+		if p.parent.Err() == nil {
+			reapCommandGroup(p.command)
+		}
 	})
 
 	stderr := p.stderr.Bytes()
