@@ -40,7 +40,9 @@ func withCLIDefaults(config cliBackendConfig, defaultPath string) cliBackendConf
 		config.streamRunner = streamingRunnerFor(config.env, config.dir)
 	}
 	config.args = append([]string(nil), config.args...)
-	config.env = append([]string(nil), config.env...)
+	if config.env != nil {
+		config.env = append([]string(nil), config.env...)
+	}
 	return config
 }
 
