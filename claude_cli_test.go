@@ -279,3 +279,75 @@ func TestClaudeCLIErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeCLIOptionOverrides(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{stdout: []byte(`{"type":"result","subtype":"success","result":"ok"}`)}
+	client, err := newClient(Config{
+		Provider: ProviderClaude,
+		Flavor:   FlavorCLI,
+		Model:    "claude-test",
+		CLIArgs:  []string{"--safe-mode"},
+		Claude:   ClaudeOptions{PermissionMode: "acceptEdits", ReplaceSystemPrompt: true},
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	if _, err := client.Generate(context.Background(), Request{
+		System:    "persona",
+		MaxTokens: 32,
+		Messages:  []Message{User("q")},
+	}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	runner.assertCall(t, "claude", []string{
+		"-p", "--output-format", "json", "--permission-mode", "acceptEdits", "--model", "claude-test",
+		"--system-prompt", "persona",
+		"--safe-mode",
+	}, "q")
+}
+
+func TestClaudeCLISurfacesAPIErrorStatus(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{
+		stdout:   []byte(`{"type":"result","subtype":"error_max_turns","is_error":true,"errors":["model not found"],"api_error_status":404,"terminal_reason":"api_error"}`),
+		exitCode: 1,
+	}
+	client, err := newClient(Config{
+		Provider: ProviderClaude,
+		Flavor:   FlavorCLI,
+		Model:    "claude-test",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	_, err = client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}})
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("Generate() error = %T %v, want *Error", err, err)
+	}
+	if target.Status != 404 || target.Reason != "api_error" || target.Code != "error_max_turns" {
+		t.Fatalf("error = %+v, want status 404 / reason api_error / code error_max_turns", target)
+	}
+	if target.Message != "model not found" {
+		t.Fatalf("message = %q, want errors[] join", target.Message)
+	}
+}
+
+func TestClaudeCLIOmitsModelWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{stdout: []byte(`{"type":"result","subtype":"success","result":"ok"}`)}
+	client, err := newClient(Config{Provider: ProviderClaude, Flavor: FlavorCLI}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	if _, err := client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	runner.assertCall(t, "claude", []string{"-p", "--output-format", "json", "--permission-mode", "default"}, "q")
+}

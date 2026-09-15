@@ -28,6 +28,9 @@ type Error struct {
 	Operation string
 	// Status is an HTTP status or process exit code, when available.
 	Status int
+	// Reason is a provider or CLI terminal reason, when available (for the
+	// Claude CLI, the result envelope's terminal_reason).
+	Reason string
 	// Code is the provider or CLI failure code, when available.
 	Code string
 	// Message is a concise upstream or normalized failure message.

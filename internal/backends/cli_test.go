@@ -3,6 +3,7 @@ package backends
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -131,6 +132,14 @@ func TestCommandCancellationDoesNotWaitForDescendant(t *testing.T) {
 }
 
 func TestCommandHelperProcess(t *testing.T) {
+	if os.Getenv("LLM_DRIVER_HELPER_PROCESS") == "probe" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("getwd: %v", err)
+		}
+		fmt.Fprintf(os.Stdout, "probe=%s cwd=%s", os.Getenv("LLM_DRIVER_PROBE"), cwd)
+		return
+	}
 	if os.Getenv("LLM_DRIVER_HELPER_DESCENDANT") == "1" {
 		time.Sleep(30 * time.Second)
 		return
@@ -167,5 +176,30 @@ func TestCommandOutputIsBounded(t *testing.T) {
 	}
 	if got := string(buffer.Bytes()); got != "1234" {
 		t.Fatalf("buffer = %q", got)
+	}
+}
+
+func TestCommandRunnerAppliesEnvAndDir(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", dir, err)
+	}
+
+	run := commandRunnerFor([]string{"LLM_DRIVER_HELPER_PROCESS=probe", "LLM_DRIVER_PROBE=hello"}, dir)
+	stdout, _, exitCode, err := run(
+		context.Background(),
+		os.Args[0],
+		[]string{"-test.run=^TestCommandHelperProcess$"},
+		nil,
+	)
+	if err != nil || exitCode != 0 {
+		t.Fatalf("run() = exit %d, err %v", exitCode, err)
+	}
+	want := fmt.Sprintf("probe=hello cwd=%s", resolvedDir)
+	if !strings.Contains(string(stdout), want) {
+		t.Fatalf("stdout = %q, want it to contain %q", stdout, want)
 	}
 }

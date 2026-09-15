@@ -29,3 +29,12 @@ func configureCommand(command *exec.Cmd) {
 		return nil
 	}
 }
+
+// reapCommandGroup terminates any descendants left after the command exits, so
+// a provider CLI cannot leave a background process running past the call.
+func reapCommandGroup(command *exec.Cmd) {
+	if command.Process == nil {
+		return
+	}
+	_ = exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(command.Process.Pid)).Run()
+}

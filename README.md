@@ -108,8 +108,9 @@ llmdriver.Config{Provider: llmdriver.ProviderOpenAI, Flavor: llmdriver.FlavorAPI
 llmdriver.Config{Provider: llmdriver.ProviderOpenAI, Flavor: llmdriver.FlavorCLI, Model: "gpt-5.6-sol"}
 ```
 
-The request and `Generate` call stay the same. Models are always explicit; the
-library does not silently select or update one.
+The request and `Generate` call stay the same. API flavors require an explicit
+model; CLI flavors may leave it empty to use the provider CLI's own default
+(and the library never silently selects or updates one).
 
 ## Switchable CLI example
 

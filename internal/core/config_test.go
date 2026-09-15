@@ -18,6 +18,17 @@ func TestConfigValidateAcceptsFourTargets(t *testing.T) {
 	}
 }
 
+func TestConfigValidateAllowsEmptyModelForCLI(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []Provider{ProviderClaude, ProviderOpenAI} {
+		config := Config{Provider: provider, Flavor: FlavorCLI}
+		if err := config.validate(); err != nil {
+			t.Errorf("validate(%s/cli) with empty model: %v", provider, err)
+		}
+	}
+}
+
 func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 	t.Parallel()
 
@@ -30,6 +41,7 @@ func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 		{name: "model", config: Config{Provider: ProviderClaude, Flavor: FlavorAPI, Model: "  "}},
 		{name: "base URL", config: Config{Provider: ProviderClaude, Flavor: FlavorAPI, Model: "model", BaseURL: "://bad"}},
 		{name: "CLI path", config: Config{Provider: ProviderClaude, Flavor: FlavorCLI, Model: "model", CLIPath: "  "}},
+		{name: "codex sandbox conflict", config: Config{Provider: ProviderOpenAI, Flavor: FlavorCLI, Model: "model", Codex: CodexOptions{SandboxMode: "workspace-write", OmitSandbox: true}}},
 	}
 
 	for _, test := range tests {
