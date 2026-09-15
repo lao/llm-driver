@@ -11,12 +11,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lao/llm-driver/internal/core"
 )
 
 const (
-	maxCLIOutputBytes   = 16 << 20
+	// maxCLIOutputBytes caps each of stdout and stderr for a CLI invocation.
+	// 64 MiB accommodates large model responses (e.g. multi-file code generation)
+	// that exceeded the previous 16 MiB limit.  boundedBuffer allocates on
+	// demand, so idle calls pay no memory cost; in the worst case a runaway CLI
+	// can force 128 MiB into the heap (64 MiB × 2 streams) before being cut off.
+	maxCLIOutputBytes   = 64 << 20
 	cliCommandWaitDelay = 250 * time.Millisecond
 	// cliFailDrainTimeout bounds the best-effort drain-and-stamp on the failure
 	// path so a CLI that emits its final line and then hangs (no more bytes, no
@@ -25,6 +31,24 @@ const (
 )
 
 var errCLIOutputTooLarge = errors.New("llmdriver: CLI output exceeds limit")
+
+// maxErrorMessageBytes bounds a CLI-derived message carried on an *Error, so a
+// model-sized result or a large stderr dump does not bloat a single log line.
+const maxErrorMessageBytes = 500
+
+// clipMessage trims surrounding whitespace and caps a CLI-derived message on a
+// UTF-8 rune boundary.
+func clipMessage(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= maxErrorMessageBytes {
+		return s
+	}
+	end := maxErrorMessageBytes
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	return s[:end]
+}
 
 type boundedBuffer struct {
 	buffer   bytes.Buffer
@@ -53,6 +77,26 @@ func (b *boundedBuffer) Bytes() []byte {
 }
 
 func defaultCommandRunner(ctx context.Context, name string, args []string, stdin []byte) ([]byte, []byte, int, error) {
+	return runCLI(ctx, name, args, stdin, nil, "")
+}
+
+// commandRunnerFor returns a CommandRunner whose child inherits env and runs in
+// dir. A nil env inherits the parent environment; a non-nil empty env fails
+// closed with no variables.
+func commandRunnerFor(env []string, dir string) core.CommandRunner {
+	return func(ctx context.Context, name string, args []string, stdin []byte) ([]byte, []byte, int, error) {
+		return runCLI(ctx, name, args, stdin, env, dir)
+	}
+}
+
+func runCLI(
+	ctx context.Context,
+	name string,
+	args []string,
+	stdin []byte,
+	env []string,
+	dir string,
+) ([]byte, []byte, int, error) {
 	path, err := exec.LookPath(name)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("%w: %s", core.ErrExecutableNotFound, name)
@@ -61,6 +105,8 @@ func defaultCommandRunner(ctx context.Context, name string, args []string, stdin
 	command := exec.CommandContext(ctx, path, args...)
 	configureCommand(command)
 	command.WaitDelay = cliCommandWaitDelay
+	command.Dir = dir
+	command.Env = env
 	command.Stdin = bytes.NewReader(stdin)
 	stdout := newBoundedBuffer(maxCLIOutputBytes)
 	stderr := newBoundedBuffer(maxCLIOutputBytes)
@@ -68,6 +114,14 @@ func defaultCommandRunner(ctx context.Context, name string, args []string, stdin
 	command.Stderr = stderr
 
 	err = command.Run()
+	// Reap any background child the CLI left behind, on success as well as
+	// failure: a provider CLI that daemonizes a helper must not outlive the call.
+	// When the context triggered Cancel, the group was already killed before Wait
+	// returned (while the PID was still valid), so repeating after Wait would only
+	// widen the PID-reuse race window for no benefit.
+	if ctx.Err() == nil {
+		reapCommandGroup(command)
+	}
 	if err == nil {
 		return stdout.Bytes(), stderr.Bytes(), 0, nil
 	}
@@ -99,12 +153,12 @@ func executeCLI(
 			Provider:  provider,
 			Flavor:    core.FlavorCLI,
 			Operation: "generate",
-			Message:   strings.TrimSpace(string(stderr)),
+			Message:   clipMessage(string(stderr)),
 			Err:       err,
 		}
 	}
 	if exitCode != 0 {
-		message := strings.TrimSpace(string(stderr))
+		message := clipMessage(string(stderr))
 		if message == "" {
 			message = "CLI command failed"
 		}
@@ -140,6 +194,24 @@ func defaultStreamingCommandRunner(
 	args []string,
 	stdin []byte,
 ) (cliProcess, error) {
+	return runCLIStream(ctx, name, args, stdin, nil, "")
+}
+
+// streamingRunnerFor mirrors commandRunnerFor for the streaming path.
+func streamingRunnerFor(env []string, dir string) streamingCommandRunner {
+	return func(ctx context.Context, name string, args []string, stdin []byte) (cliProcess, error) {
+		return runCLIStream(ctx, name, args, stdin, env, dir)
+	}
+}
+
+func runCLIStream(
+	ctx context.Context,
+	name string,
+	args []string,
+	stdin []byte,
+	env []string,
+	dir string,
+) (cliProcess, error) {
 	path, err := exec.LookPath(name)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", core.ErrExecutableNotFound, name)
@@ -151,6 +223,8 @@ func defaultStreamingCommandRunner(
 	command := exec.CommandContext(runCtx, path, args...)
 	configureCommand(command)
 	command.WaitDelay = cliCommandWaitDelay
+	command.Dir = dir
+	command.Env = env
 	command.Stdin = bytes.NewReader(stdin)
 	stderr := newBoundedBuffer(maxCLIOutputBytes)
 	command.Stderr = stderr
@@ -189,7 +263,13 @@ func (p *execCLIProcess) stdout() io.Reader {
 }
 
 func (p *execCLIProcess) wait() (int, []byte, error) {
-	p.waitOnce.Do(func() { p.waitErr = p.command.Wait() })
+	p.waitOnce.Do(func() {
+		p.waitErr = p.command.Wait()
+		// Only reap when Cancel has not already killed the group—see runCLI.
+		if p.parent.Err() == nil {
+			reapCommandGroup(p.command)
+		}
+	})
 
 	stderr := p.stderr.Bytes()
 	if p.waitErr == nil {
@@ -329,10 +409,10 @@ func (s *cliChunkStream) fail(err error) error {
 func (s *cliChunkStream) exit() error {
 	exitCode, stderr, err := s.process.wait()
 	if err != nil {
-		return s.streamError(err, strings.TrimSpace(string(stderr)))
+		return s.streamError(err, clipMessage(string(stderr)))
 	}
 	if exitCode != 0 {
-		message := strings.TrimSpace(string(stderr))
+		message := clipMessage(string(stderr))
 		if message == "" {
 			message = "CLI command failed"
 		}

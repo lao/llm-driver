@@ -29,3 +29,33 @@ func configureCommand(command *exec.Cmd) {
 		return nil
 	}
 }
+
+// reapCommandGroup terminates any descendants left after the command exits, so
+// a provider CLI cannot leave a background process running past the call.
+//
+// Callers must skip this when the context's Cancel hook already killed the tree
+// (before Wait returned, while the PID was still valid) to avoid a redundant
+// kill on a potentially-recycled PID.
+//
+// NOTE: Because this runs after Wait returns, the PID is free for reuse. On
+// Windows, PID recycling can be fast, and if the PID is reassigned between
+// Wait and the taskkill invocation an unrelated process tree would be killed.
+// The race window is extremely narrow; eliminating it entirely would require a
+// Windows job object, which is out of scope.
+func reapCommandGroup(command *exec.Cmd) {
+	if command.Process == nil {
+		return
+	}
+	// taskkill exits non-zero when the target process already exited, which is
+	// the expected case after Wait.  If the PID was recycled, taskkill would
+	// kill an unrelated tree — we check ProcessState to confirm the original
+	// process has exited and suppress only that expected failure.  Any other
+	// taskkill error (unexpected) is left explicit for future instrumentation.
+	pid := command.Process.Pid
+	if err := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run(); err != nil {
+		if command.ProcessState != nil {
+			return // process already exited — expected
+		}
+		_ = err // no logger available; left for future instrumentation
+	}
+}

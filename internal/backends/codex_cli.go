@@ -102,9 +102,21 @@ func (b *codexCLIBackend) commandArgs(request core.Request, operation string) ([
 	args := []string{
 		"exec",
 		"--json",
-		"--sandbox", "read-only",
+	}
+	// A permissions profile and a sandbox mode cannot both be set: OmitSandbox
+	// drops the flag so a caller-supplied profile (via CLIArgs) applies instead.
+	if !b.codex.OmitSandbox {
+		sandbox := b.codex.SandboxMode
+		if sandbox == "" {
+			sandbox = "read-only"
+		}
+		args = append(args, "--sandbox", sandbox)
+	}
+	args = append(args,
 		"--skip-git-repo-check",
-		"--model", b.model,
+	)
+	if b.model != "" {
+		args = append(args, "--model", b.model)
 	}
 	if request.System != "" {
 		args = append(args, "--config", codexDeveloperInstructions(request.System))
@@ -343,7 +355,7 @@ func codexCLIResultError(operation string, code string, message string) error {
 		Flavor:    core.FlavorCLI,
 		Operation: operation,
 		Code:      code,
-		Message:   strings.TrimSpace(message),
+		Message:   clipMessage(message),
 	}
 }
 

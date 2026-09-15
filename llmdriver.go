@@ -12,6 +12,10 @@ type (
 	Flavor = core.Flavor
 	// Config selects a provider, transport flavor, and model for a Client.
 	Config = core.Config
+	// ClaudeOptions carries Claude CLI flags for a CLI-flavored client.
+	ClaudeOptions = core.ClaudeOptions
+	// CodexOptions carries Codex CLI flags for a CLI-flavored client.
+	CodexOptions = core.CodexOptions
 	// Role identifies the author of a Message.
 	Role = core.Role
 	// Message is one text turn in a generation request.

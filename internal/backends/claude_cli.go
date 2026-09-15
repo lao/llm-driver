@@ -15,12 +15,20 @@ type claudeCLIBackend struct {
 }
 
 type claudeCLIResult struct {
-	Type      string `json:"type"`
-	Subtype   string `json:"subtype"`
-	IsError   bool   `json:"is_error"`
-	Result    string `json:"result"`
-	SessionID string `json:"session_id"`
-	Usage     struct {
+	Type       string   `json:"type"`
+	Subtype    string   `json:"subtype"`
+	IsError    bool     `json:"is_error"`
+	Result     string   `json:"result"`
+	Errors     []string `json:"errors"`
+	StopReason string   `json:"stop_reason"`
+	// APIErrorStatus is the upstream HTTP status the CLI carries on an is_error
+	// result; it is the authoritative signal for a 404 (unknown model) or a 429
+	// (rate limit) that the bare exit code obscures.
+	APIErrorStatus int `json:"api_error_status"`
+	// TerminalReason is the CLI's terminal_reason (e.g. "api_error").
+	TerminalReason string `json:"terminal_reason"`
+	SessionID      string `json:"session_id"`
+	Usage          struct {
 		InputTokens              int `json:"input_tokens"`
 		OutputTokens             int `json:"output_tokens"`
 		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
@@ -43,14 +51,14 @@ func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (
 	args := []string{
 		"-p",
 		"--output-format", "json",
-		"--permission-mode", "default",
-		"--model", b.model,
+		"--permission-mode", b.permissionMode(),
+	}
+	if b.model != "" {
+		args = append(args, "--model", b.model)
 	}
 	args = appendClaudeSchemaArgs(args, request.OutputSchema)
 	args = appendClaudeEffortArgs(args, request.Effort)
-	if request.System != "" {
-		args = append(args, "--append-system-prompt", request.System)
-	}
+	args = appendClaudeSystemArgs(args, request.System, b.claude.ReplaceSystemPrompt)
 	args = append(args, b.args...)
 
 	stdout, err := executeCLI(
@@ -73,7 +81,11 @@ func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (
 			if _, diagnosticErr := parseClaudeCLIOutput(stdout, b.model); diagnosticErr != nil {
 				var diagnostic *core.Error
 				if errors.As(diagnosticErr, &diagnostic) && diagnostic.Message != "" {
-					diagnostic.Status = processError.Status
+					// The payload's api_error_status is the real diagnosis; the
+					// exit code only fills in when the payload carried none.
+					if diagnostic.Status == 0 {
+						diagnostic.Status = processError.Status
+					}
 					return nil, diagnostic
 				}
 			}
@@ -111,6 +123,28 @@ func appendClaudeEffortArgs(args []string, effort core.Effort) []string {
 	return append(args, "--effort", string(effort))
 }
 
+// permissionMode is the --permission-mode value: the caller's override, or the
+// CLI's own default ("default") so a headless run cannot approve tool actions.
+func (b *claudeCLIBackend) permissionMode() string {
+	if b.claude.PermissionMode != "" {
+		return b.claude.PermissionMode
+	}
+	return "default"
+}
+
+// appendClaudeSystemArgs routes system text to --system-prompt (replace) or
+// --append-system-prompt (append) as configured. No flag is emitted for empty
+// system text.
+func appendClaudeSystemArgs(args []string, system string, replace bool) []string {
+	if system == "" {
+		return args
+	}
+	if replace {
+		return append(args, "--system-prompt", system)
+	}
+	return append(args, "--append-system-prompt", system)
+}
+
 // GenerateStream builds the same transcript and system flags as the batch path
 // but asks for incremental stream-json output. Print mode requires --verbose for
 // stream-json, and --include-partial-messages adds the raw Anthropic SSE
@@ -121,14 +155,14 @@ func (b *claudeCLIBackend) GenerateStream(ctx context.Context, request core.Requ
 		"--output-format", "stream-json",
 		"--include-partial-messages",
 		"--verbose",
-		"--permission-mode", "default",
-		"--model", b.model,
+		"--permission-mode", b.permissionMode(),
+	}
+	if b.model != "" {
+		args = append(args, "--model", b.model)
 	}
 	args = appendClaudeSchemaArgs(args, request.OutputSchema)
 	args = appendClaudeEffortArgs(args, request.Effort)
-	if request.System != "" {
-		args = append(args, "--append-system-prompt", request.System)
-	}
+	args = appendClaudeSystemArgs(args, request.System, b.claude.ReplaceSystemPrompt)
 	args = append(args, b.args...)
 
 	process, err := startCLIStream(
@@ -226,7 +260,10 @@ func claudeCLIDecodeError(operation string, err error) error {
 
 func claudeCLIResponse(result claudeCLIResult, model string, operation string) (*core.Response, error) {
 	if result.Type != "result" || result.Subtype != "success" || result.IsError {
-		message := result.Result
+		message := strings.Join(result.Errors, "; ")
+		if strings.TrimSpace(message) == "" {
+			message = result.Result
+		}
 		if strings.TrimSpace(message) == "" {
 			message = "Claude CLI returned an unsuccessful result"
 		}
@@ -234,15 +271,18 @@ func claudeCLIResponse(result claudeCLIResult, model string, operation string) (
 			Provider:  core.ProviderClaude,
 			Flavor:    core.FlavorCLI,
 			Operation: operation,
+			Status:    result.APIErrorStatus,
+			Reason:    result.TerminalReason,
 			Code:      claudeCLIErrorCode(result),
-			Message:   message,
+			Message:   clipMessage(message),
 		}
 	}
 
 	return &core.Response{
-		ID:    result.SessionID,
-		Model: model,
-		Text:  result.Result,
+		ID:               result.SessionID,
+		Model:            model,
+		Text:             result.Result,
+		CompletionReason: claudeCompletionReason(result.StopReason),
 		Usage: core.Usage{
 			InputTokens:              result.Usage.InputTokens,
 			OutputTokens:             result.Usage.OutputTokens,
@@ -250,6 +290,24 @@ func claudeCLIResponse(result claudeCLIResult, model string, operation string) (
 			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
 		},
 	}, nil
+}
+
+// claudeCompletionReason maps the CLI's stop_reason to the neutral enum,
+// matching normalizeAnthropicCompletionReason: only explicitly known reasons
+// map, and an unrecognized one stays the zero value rather than guessing.
+func claudeCompletionReason(stopReason string) core.CompletionReason {
+	switch stopReason {
+	case "end_turn", "stop_sequence":
+		return core.CompletionReasonStop
+	case "max_tokens":
+		return core.CompletionReasonMaxTokens
+	case "refusal":
+		return core.CompletionReasonRefusal
+	case "tool_use":
+		return core.CompletionReasonToolUse
+	default:
+		return ""
+	}
 }
 
 func claudeCLIErrorCode(result claudeCLIResult) string {

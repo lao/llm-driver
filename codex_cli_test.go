@@ -327,3 +327,72 @@ func TestCodexCLIErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexCLISandboxOptions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		config   Config
+		wantArgs []string
+	}{
+		{
+			name: "sandbox mode override",
+			config: Config{
+				Provider: ProviderOpenAI,
+				Flavor:   FlavorCLI,
+				Model:    "gpt-test",
+				Codex:    CodexOptions{SandboxMode: "workspace-write"},
+			},
+			wantArgs: []string{
+				"exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", "--model", "gpt-test", "-",
+			},
+		},
+		{
+			name: "omit sandbox for a permission profile",
+			config: Config{
+				Provider: ProviderOpenAI,
+				Flavor:   FlavorCLI,
+				Model:    "gpt-test",
+				CLIArgs:  []string{"--config", "permissions.prbooter_review={}"},
+				Codex:    CodexOptions{OmitSandbox: true},
+			},
+			wantArgs: []string{
+				"exec", "--json", "--skip-git-repo-check", "--model", "gpt-test",
+				"--config", "permissions.prbooter_review={}", "-",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			runner := &fakeCommandRunner{stdout: []byte(`{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}` + "\n" + `{"type":"turn.completed"}`)}
+			client, err := newClient(test.config, runner.run)
+			if err != nil {
+				t.Fatalf("New(): %v", err)
+			}
+			if _, err := client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}}); err != nil {
+				t.Fatalf("Generate(): %v", err)
+			}
+			if !slices.Equal(runner.args, test.wantArgs) {
+				t.Fatalf("args = %#v, want %#v", runner.args, test.wantArgs)
+			}
+		})
+	}
+}
+
+func TestCodexCLIOmitsModelWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{stdout: []byte(`{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}` + "\n" + `{"type":"turn.completed"}`)}
+	client, err := newClient(Config{Provider: ProviderOpenAI, Flavor: FlavorCLI}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	if _, err := client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	runner.assertCall(t, "codex", []string{"exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", "-"}, "q")
+}

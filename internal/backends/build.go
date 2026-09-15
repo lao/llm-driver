@@ -17,23 +17,32 @@ type cliBackendConfig struct {
 	model        string
 	path         string
 	args         []string
+	env          []string
+	dir          string
+	claude       core.ClaudeOptions
+	codex        core.CodexOptions
 	runner       core.CommandRunner
 	streamRunner streamingCommandRunner
 }
 
 // withCLIDefaults supplies the executable and runners a CLI backend falls back
 // to when the caller left them unset, and copies the caller's extra arguments.
+// The default runners carry the caller's environment and working directory so
+// the injected-runner seam (used by tests) keeps its signature.
 func withCLIDefaults(config cliBackendConfig, defaultPath string) cliBackendConfig {
 	if config.path == "" {
 		config.path = defaultPath
 	}
 	if config.runner == nil {
-		config.runner = defaultCommandRunner
+		config.runner = commandRunnerFor(config.env, config.dir)
 	}
 	if config.streamRunner == nil {
-		config.streamRunner = defaultStreamingCommandRunner
+		config.streamRunner = streamingRunnerFor(config.env, config.dir)
 	}
 	config.args = append([]string(nil), config.args...)
+	if config.env != nil {
+		config.env = append([]string(nil), config.env...)
+	}
 	return config
 }
 
@@ -50,6 +59,10 @@ func New(config core.Config, runner core.CommandRunner) (core.Backend, error) {
 		model:  config.Model,
 		path:   config.CLIPath,
 		args:   config.CLIArgs,
+		env:    config.CLIEnv,
+		dir:    config.CLIWorkDir,
+		claude: config.Claude,
+		codex:  config.Codex,
 		runner: runner,
 	}
 
