@@ -3,6 +3,7 @@
 package backends
 
 import (
+	"log/slog"
 	"os"
 	"os/exec"
 	"strconv"
@@ -46,5 +47,15 @@ func reapCommandGroup(command *exec.Cmd) {
 	if command.Process == nil {
 		return
 	}
-	_ = exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(command.Process.Pid)).Run()
+	pid := command.Process.Pid
+	if err := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run(); err != nil {
+		// taskkill exits non-zero when the process tree already exited; only
+		// warn on unexpected failures so operators can spot a miss-targeted kill.
+		if command.ProcessState == nil || command.ProcessState.ExitCode() == 0 {
+			slog.Warn("reapCommandGroup: taskkill failed",
+				"pid", pid,
+				"error", err,
+			)
+		}
+	}
 }
