@@ -42,6 +42,23 @@ func TestParseOptionsBuildsConfigAndRequest(t *testing.T) {
 	}
 }
 
+func TestParseOptionsAcceptsOpenCode(t *testing.T) {
+	t.Parallel()
+
+	parsed, err := parseOptions([]string{
+		"--provider", "opencode",
+		"--flavor", "cli",
+		"--model", "anthropic/claude-sonnet-4-5",
+		"--prompt", "Say hello",
+	}, new(strings.Builder))
+	if err != nil {
+		t.Fatalf("parseOptions(): %v", err)
+	}
+	if parsed.config.Provider != llmdriver.ProviderOpenCode || parsed.config.Flavor != llmdriver.FlavorCLI {
+		t.Fatalf("config = %+v", parsed.config)
+	}
+}
+
 func TestParseOptionsUsesDocumentedTokenDefault(t *testing.T) {
 	t.Parallel()
 
@@ -96,7 +113,7 @@ func TestParseOptionsHelpDescribesAuthentication(t *testing.T) {
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("parseOptions() error = %v, want flag.ErrHelp", err)
 	}
-	for _, want := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "local claude or codex login", "--max-tokens"} {
+	for _, want := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "local claude, codex, or opencode login", "--max-tokens"} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("help missing %q:\n%s", want, output.String())
 		}

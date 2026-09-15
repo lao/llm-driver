@@ -12,8 +12,8 @@ import (
 	"github.com/lao/llm-driver/internal/core"
 )
 
-// contractTarget is one of the four provider/flavor combinations every
-// streaming contract case runs against.
+// contractTarget is one provider/flavor combination every streaming contract
+// case runs against.
 type contractTarget struct {
 	provider core.Provider
 	flavor   core.Flavor
@@ -25,6 +25,7 @@ func contractStreamTargets() []contractTarget {
 		{provider: core.ProviderClaude, flavor: core.FlavorCLI},
 		{provider: core.ProviderOpenAI, flavor: core.FlavorAPI},
 		{provider: core.ProviderOpenAI, flavor: core.FlavorCLI},
+		{provider: core.ProviderOpenCode, flavor: core.FlavorCLI},
 	}
 }
 
@@ -45,7 +46,7 @@ func newSSETestServer(t *testing.T, events []string) *httptest.Server {
 	return server
 }
 
-func TestContractGenerateStreamAcrossFourTargets(t *testing.T) {
+func TestContractGenerateStreamAcrossTargets(t *testing.T) {
 	t.Parallel()
 
 	for _, target := range contractStreamTargets() {
@@ -114,7 +115,7 @@ func TestContractGenerateStreamAcrossFourTargets(t *testing.T) {
 	}
 }
 
-func TestContractStreamMidStreamFailureAcrossFourTargets(t *testing.T) {
+func TestContractStreamMidStreamFailureAcrossTargets(t *testing.T) {
 	t.Parallel()
 
 	for _, target := range contractStreamTargets() {
@@ -149,7 +150,7 @@ func TestContractStreamMidStreamFailureAcrossFourTargets(t *testing.T) {
 	}
 }
 
-func TestContractStreamTruncatedOutputAcrossFourTargets(t *testing.T) {
+func TestContractStreamTruncatedOutputAcrossTargets(t *testing.T) {
 	t.Parallel()
 
 	for _, target := range contractStreamTargets() {
@@ -190,10 +191,10 @@ func TestContractStreamTruncatedOutputAcrossFourTargets(t *testing.T) {
 	}
 }
 
-// TestContractStreamStructuredOutputAcrossFourTargets streams the same
-// OutputSchema request through all four targets: chunks stay raw JSON-text
+// TestContractStreamStructuredOutputAcrossTargets streams the same
+// OutputSchema request through every target: chunks stay raw JSON-text
 // deltas and every target reports the same StructuredOutput at Finish.
-func TestContractStreamStructuredOutputAcrossFourTargets(t *testing.T) {
+func TestContractStreamStructuredOutputAcrossTargets(t *testing.T) {
 	t.Parallel()
 
 	for _, target := range contractStreamTargets() {
@@ -238,7 +239,8 @@ func newContractStructuredStreamTarget(t *testing.T, provider core.Provider, fla
 	config := core.Config{Provider: provider, Flavor: flavor, Model: "contract-model"}
 	if flavor == core.FlavorCLI {
 		var lines []string
-		if provider == core.ProviderClaude {
+		switch provider {
+		case core.ProviderClaude:
 			lines = []string{
 				`{"type":"system","subtype":"init","session_id":"contract-session"}`,
 				`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}`,
@@ -246,7 +248,13 @@ func newContractStructuredStreamTarget(t *testing.T, provider core.Provider, fla
 				`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\"42\"}"}}}`,
 				`{"type":"result","subtype":"success","result":"{\"answer\":\"42\"}","session_id":"contract-session","usage":{"input_tokens":1,"output_tokens":1}}`,
 			}
-		} else {
+		case core.ProviderOpenCode:
+			lines = []string{
+				`{"type":"text","sessionID":"contract-session","part":{"id":"prt_1","type":"text","text":"{\"answer\":"}}`,
+				`{"type":"text","sessionID":"contract-session","part":{"id":"prt_2","type":"text","text":"\"42\"}"}}`,
+				`{"type":"step_finish","sessionID":"contract-session","part":{"id":"prt_3","type":"step-finish","reason":"stop","tokens":{"input":1,"output":1}}}`,
+			}
+		default:
 			lines = []string{
 				`{"type":"thread.started","thread_id":"contract-thread"}`,
 				`{"type":"item.updated","item":{"id":"m","type":"agent_message","text":"{\"answer\":"}}`,
@@ -283,7 +291,8 @@ func newContractStructuredStreamTarget(t *testing.T, provider core.Provider, fla
 }
 
 func contractStreamLines(provider core.Provider) []string {
-	if provider == core.ProviderClaude {
+	switch provider {
+	case core.ProviderClaude:
 		return []string{
 			`{"type":"system","subtype":"init","session_id":"contract-session"}`,
 			`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}`,
@@ -292,13 +301,21 @@ func contractStreamLines(provider core.Provider) []string {
 			`{"type":"result","subtype":"success","result":"contract answer","session_id":"contract-session",` +
 				`"usage":{"input_tokens":12,"output_tokens":4}}`,
 		}
-	}
-	return []string{
-		`{"type":"thread.started","thread_id":"contract-thread"}`,
-		`{"type":"item.updated","item":{"id":"message-1","type":"agent_message","text":"contract "}}`,
-		`{"type":"item.updated","item":{"id":"message-1","type":"agent_message","text":"contract answer"}}`,
-		`{"type":"item.completed","item":{"id":"message-1","type":"agent_message","text":"contract answer"}}`,
-		`{"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":4}}`,
+	case core.ProviderOpenCode:
+		return []string{
+			`{"type":"step_start","sessionID":"contract-session","part":{"id":"prt_1","type":"step-start"}}`,
+			`{"type":"text","sessionID":"contract-session","part":{"id":"prt_2","type":"text","text":"contract "}}`,
+			`{"type":"text","sessionID":"contract-session","part":{"id":"prt_3","type":"text","text":"answer"}}`,
+			`{"type":"step_finish","sessionID":"contract-session","part":{"id":"prt_4","type":"step-finish","reason":"stop","tokens":{"input":12,"output":4}}}`,
+		}
+	default:
+		return []string{
+			`{"type":"thread.started","thread_id":"contract-thread"}`,
+			`{"type":"item.updated","item":{"id":"message-1","type":"agent_message","text":"contract "}}`,
+			`{"type":"item.updated","item":{"id":"message-1","type":"agent_message","text":"contract answer"}}`,
+			`{"type":"item.completed","item":{"id":"message-1","type":"agent_message","text":"contract answer"}}`,
+			`{"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":4}}`,
+		}
 	}
 }
 

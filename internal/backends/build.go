@@ -62,6 +62,8 @@ func New(config core.Config, runner core.CommandRunner) (core.Backend, error) {
 		return newOpenAIBackend(apiConfig), nil
 	case config.Provider == core.ProviderOpenAI && config.Flavor == core.FlavorCLI:
 		return newCodexCLIBackend(cliConfig), nil
+	case config.Provider == core.ProviderOpenCode && config.Flavor == core.FlavorCLI:
+		return newOpenCodeCLIBackend(cliConfig), nil
 	default:
 		return nil, &core.Error{
 			Provider:  config.Provider,
