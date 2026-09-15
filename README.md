@@ -1,6 +1,6 @@
 # llm-driver
 
-`llm-driver` is a small Go library with one text-generation API and four
+`llm-driver` is a small Go library with one text-generation API and five
 switchable targets:
 
 | Provider | Flavor | Target | Authentication |
@@ -9,6 +9,7 @@ switchable targets:
 | `claude` | `cli` | Local `claude -p` | Existing Claude CLI login |
 | `openai` | `api` | OpenAI Responses API | `OPENAI_API_KEY` |
 | `openai` | `cli` | Local `codex exec` | Existing Codex CLI login |
+| `opencode` | `cli` | Local `opencode run` | Existing opencode login (many upstream providers) |
 
 Changing the provider, flavor, or model does not change application call sites.
 
@@ -89,7 +90,7 @@ exhausted, with text equal to the concatenation of every chunk. `Close` aborts
 an in-flight stream, is idempotent, and may be called while another goroutine
 is inside `Next`. Cancelling the context terminates the stream.
 
-The same loop works for all four targets. Chunk granularity is
+The same loop works for all five targets. Chunk granularity is
 target-defined and is not normalized: see the CLI differences below.
 
 To switch targets, change only `Config`:
@@ -106,6 +107,9 @@ llmdriver.Config{Provider: llmdriver.ProviderOpenAI, Flavor: llmdriver.FlavorAPI
 
 // Local Codex CLI
 llmdriver.Config{Provider: llmdriver.ProviderOpenAI, Flavor: llmdriver.FlavorCLI, Model: "gpt-5.6-sol"}
+
+// Local opencode CLI (any model from `opencode models`)
+llmdriver.Config{Provider: llmdriver.ProviderOpenCode, Flavor: llmdriver.FlavorCLI, Model: "anthropic/claude-sonnet-4-5"}
 ```
 
 The request and `Generate` call stay the same. API flavors require an explicit
@@ -136,6 +140,34 @@ Run `go run ./examples/switchable --help` for all options. Use
 `--provider claude --flavor api` (and a Claude model), for example, without
 changing the example's generation code.
 
+## opencode models
+
+`opencode` fronts many upstream providers, so its model is a `provider/model`
+id, for example `anthropic/claude-sonnet-4-5` or
+`openrouter/anthropic/claude-sonnet-4.5#high`. `ListModels` runs
+`opencode models` and returns every id the installed opencode can actually
+run — opencode resolves its own credentials, provider environment variables,
+and `opencode.json` config:
+
+```go
+models, err := llmdriver.ListModels(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(models) // e.g. []string{"opencode/big-pickle", "anthropic/claude-sonnet-4-5", ...}
+
+client, err := llmdriver.New(llmdriver.Config{
+	Provider: llmdriver.ProviderOpenCode,
+	Flavor:   llmdriver.FlavorCLI,
+	Model:    models[0],
+})
+```
+
+Passing a model id returned by `ListModels` is optional: `Config.Model` is
+always a plain string, so any valid id works whether or not it was discovered.
+`ListModels` returns an `*Error` when the `opencode` binary is missing or
+fails.
+
 ## Authentication and configuration
 
 API targets use their official Go SDKs. Set `ANTHROPIC_API_KEY` or
@@ -148,6 +180,8 @@ CLI targets use the installed tool's existing login. `CLIPath` can select a
 nonstandard executable and `CLIArgs` appends direct arguments. Prompts are sent
 through stdin and no shell is invoked. Treat both CLI options as trusted
 application configuration because they control local process execution.
+`opencode` is CLI-only: its upstream providers and credentials are whatever the
+local opencode is configured for.
 
 Errors carry provider, flavor, operation, status, and provider code when those
 values are available. Use `errors.Is` for sentinels such as
@@ -165,22 +199,22 @@ time.
 `✓` = supported; `✗` = rejected with `ErrUnsupportedFeature` naming the feature
 and target.
 
-| Feature | claude/api | openai/api | claude/cli | codex/cli |
-| --- | --- | --- | --- | --- |
-| System, messages, MaxTokens, streaming | ✓ | ✓ | ✓ | ✓ |
-| Structured output (JSON schema) | ✓ | ✓ | ✓ | ✓ |
-| Reasoning effort | ✓ | ✓ | ✓ | ✓ |
-| Reasoning/thinking visibility | ✗ | ✗ | ✗ | ✗ |
-| Tool calling (caller-executed) | ✓ | ✓ | ✗ | ✗ |
-| Image input | ✗ | ✗ | ✗ | ✗ |
-| PDF/document input | ✗ | ✗ | ✗ | ✗ |
-| Temperature / TopP | ✓ | ✓ | ✗ | ✗ |
-| TopK | ✓ | ✗ | ✗ | ✗ |
-| Stop sequences | ✓ | ✗ | ✗ | ✗ |
-| Web search | ✗ | ✗ | ✗ | ✗ |
-| Metadata / end-user ID | ✓ | ✓ | ✗ | ✗ |
-| Conversation continuation by ID | ✗ | ✗ | ✗ | ✗ |
-| Token counting | ✗ | ✗ | ✗ | ✗ |
+| Feature | claude/api | openai/api | claude/cli | codex/cli | opencode/cli |
+| --- | --- | --- | --- | --- | --- |
+| System, messages, MaxTokens, streaming | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Structured output (JSON schema) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Reasoning effort | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Reasoning/thinking visibility | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Tool calling (caller-executed) | ✓ | ✓ | ✗ | ✗ | ✗ |
+| Image input | ✗ | ✗ | ✗ | ✗ | ✗ |
+| PDF/document input | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Temperature / TopP | ✓ | ✓ | ✗ | ✗ | ✗ |
+| TopK | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Stop sequences | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Web search | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Metadata / end-user ID | ✓ | ✓ | ✗ | ✗ | ✗ |
+| Conversation continuation by ID | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Token counting | ✗ | ✗ | ✗ | ✗ | ✗ |
 
 Structured output and reasoning effort are supported on every target. Sampling
 params (temperature/top-p) and the end-user ID map on both API flavors, with
@@ -188,6 +222,10 @@ top-k and stop sequences on `claude/api` only (the Responses API lacks both).
 The remaining optional features are not yet implemented, and later releases flip
 cells as each target gains support. `codex/cli` is the `openai` provider with the
 `cli` flavor.
+
+The `opencode/cli` structured-output mapping has no JSON-schema flag: it states
+the schema in the prompt and validates the returned document is JSON, failing
+with `invalid_structured_output` when it is not.
 
 ## Structured output
 
@@ -218,13 +256,14 @@ is not valid JSON, the call fails with a normalized `*Error`.
 Each target maps the schema natively: `claude/api` via `output_config.format`,
 `openai/api` via `text.format` json_schema (strict), `claude/cli` via
 `--json-schema`, and `codex/cli` via `--output-schema` (written to a private
-0600 temp file that is removed when the call completes). Streaming works the
-same way: chunks stream the raw JSON text and `StructuredOutput` is populated on
-the final `Response`.
+0600 temp file that is removed when the call completes). `opencode/cli` has no
+schema flag, so it states the schema in the prompt and validates the returned
+JSON the same way. Streaming works the same way: chunks stream the raw JSON text
+and `StructuredOutput` is populated on the final `Response`.
 
 Note: `openai/api` maps with `strict: true`, so a schema it accepts must set
 `additionalProperties: false` and mark every property required. The same schema
-may succeed on the other three targets and be rejected by OpenAI — write schemas
+may succeed on the other four targets and be rejected by OpenAI — write schemas
 to OpenAI's strict subset for portable requests.
 
 The example accepts a schema file via `--schema`:
@@ -254,10 +293,10 @@ response, err := client.Generate(ctx, llmdriver.Request{
 Values are provider-validated, never remapped: each target rejects a value it
 does not accept with `ErrUnsupportedFeature` naming the value and target.
 `openai/api` tops out at `EffortHigh`, so `EffortXHigh` and `EffortMax` are
-rejected there; the other three accept the full set. Each target maps the level
+rejected there; the other targets accept the full set. Each target maps the level
 natively: `claude/api` via `output_config.effort`, `openai/api` via
-`reasoning.effort`, `claude/cli` via `--effort`, and `codex/cli` via
-`-c model_reasoning_effort`.
+`reasoning.effort`, `claude/cli` via `--effort`, `codex/cli` via
+`-c model_reasoning_effort`, and `opencode/cli` via `--variant`.
 
 The example accepts a level via `--effort`:
 
@@ -318,8 +357,8 @@ Streaming surfaces a tool call's JSON arguments incrementally as
 `Response`. A `Message` sets exactly one of `Text` or `Parts` — the existing
 `User`/`Assistant` helpers stay text-only, and tool echoes and results use
 `Parts`. Tool calling is an API-flavor feature: `claude/api` and `openai/api`
-map `tools`/`tool_choice` natively, while `claude/cli` and `codex/cli` reject
-`Tools` or tool parts with `ErrUnsupportedFeature`.
+map `tools`/`tool_choice` natively, while `claude/cli`, `codex/cli`, and
+`opencode/cli` reject `Tools` or tool parts with `ErrUnsupportedFeature`.
 
 ## Scope and CLI differences
 
@@ -334,11 +373,12 @@ the hosted APIs:
   the portable request but have no reliable equivalent flag.
 - Claude CLI runs in single-shot print mode with the default permission mode,
   so a headless run cannot approve agent tool actions. Codex runs with a
-  read-only sandbox. Agent CLI behavior can still differ from a hosted model
-  endpoint.
+  read-only sandbox; opencode runs non-interactively without `--auto`. Agent
+  CLI behavior can still differ from a hosted model endpoint.
 - System text is passed through Claude's system-prompt flag and Codex's
-  per-invocation developer-instructions setting. Conversation text stays on
-  stdin. System text may therefore be visible to local process inspection.
+  per-invocation developer-instructions setting. opencode has no system flag, so
+  system text is prefixed to the prompt. Conversation text stays on stdin. System
+  text may therefore be visible to local process inspection.
 - CLI subprocesses inherit the application's working directory and environment
   so local authentication works. Codex's read-only sandbox prevents writes, not
   reads; isolate the host process when prompts are not trusted.
@@ -346,7 +386,8 @@ the hosted APIs:
 - Streaming chunk granularity is target-defined, like `MaxTokens`. The hosted
   APIs and `claude -p --output-format stream-json --include-partial-messages`
   produce token-sized deltas. `codex exec --json` publishes agent messages per
-  item on some versions, so a whole answer can arrive as one large chunk.
+  item on some versions, and `opencode run --format json` publishes a text part
+  per message, so a whole answer can arrive as one large chunk.
 
 Tool/function calling, images, retries, automatic fallback, and persisted
 conversations are not yet implemented; requesting one currently fails with
@@ -363,14 +404,16 @@ go test -race ./...
 go vet ./...
 ```
 
-The CLI flavors' flags (`claude -p --output-format json|stream-json ...` and
-`codex exec --json ...`) cannot be validated by the offline suite because it
-injects a fake process runner. An opt-in smoke test launches the real binaries
-so a renamed or removed flag surfaces instead of failing only at runtime. It is
-excluded by default and skips when a binary or model is missing:
+The CLI flavors' flags (`claude -p --output-format json|stream-json ...`,
+`codex exec --json ...`, and `opencode run --format json ...`) cannot be
+validated by the offline suite because it injects a fake process runner. An
+opt-in smoke test launches the real binaries so a renamed or removed flag
+surfaces instead of failing only at runtime. It is excluded by default and skips
+when a binary or model is missing:
 
 ```bash
 LLM_DRIVER_CLAUDE_CLI_MODEL=claude-sonnet-4-5 \
 LLM_DRIVER_CODEX_CLI_MODEL=gpt-5.6-sol \
+LLM_DRIVER_OPENCODE_CLI_MODEL=anthropic/claude-sonnet-4-5 \
   go test -tags integration -run 'CLIIntegration' .
 ```

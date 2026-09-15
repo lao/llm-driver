@@ -12,6 +12,7 @@ func allTargets() []target {
 		{ProviderClaude, FlavorCLI},
 		{ProviderOpenAI, FlavorAPI},
 		{ProviderOpenAI, FlavorCLI},
+		{ProviderOpenCode, FlavorCLI},
 	}
 }
 
@@ -71,7 +72,7 @@ func wantImplemented(tg target, feature Feature) bool {
 
 // TestEffortAllowedSetsPerTarget pins the per-target allowed effort values: the
 // value is provider-validated, never remapped. openai/api tops out at high;
-// the other three accept the full Anthropic-style superset.
+// the other targets accept the full Anthropic-style superset.
 func TestEffortAllowedSetsPerTarget(t *testing.T) {
 	t.Parallel()
 
@@ -84,6 +85,7 @@ func TestEffortAllowedSetsPerTarget(t *testing.T) {
 		{target{ProviderClaude, FlavorAPI}, full, nil},
 		{target{ProviderClaude, FlavorCLI}, full, nil},
 		{target{ProviderOpenAI, FlavorCLI}, full, nil},
+		{target{ProviderOpenCode, FlavorCLI}, full, nil},
 		{target{ProviderOpenAI, FlavorAPI}, []Effort{EffortLow, EffortMedium, EffortHigh}, []Effort{EffortXHigh, EffortMax}},
 	}
 	for _, test := range tests {

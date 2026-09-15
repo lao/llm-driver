@@ -63,6 +63,16 @@ go test -race ./...` green.
       `ErrUnsupportedFeature`; `Supports` == runtime; review + confirm
       P6–P9 order
 
+## Added target — opencode CLI (after Phase 5)
+
+- [x] `ProviderOpenCode` (`cli` flavor only): `opencode run --format json`
+      backend (batch + stream), capability row (structured output +
+      reasoning effort), `--variant` effort mapping, prompt-enforced schema
+- [x] `ListModels` / `backends.OpenCodeModels` (`opencode models` discovery,
+      provider/model filtering), README "opencode models" section
+- [x] Adapter + model-listing tests, contract matrix rows, integration smoke
+- [x] `doc.go`, README capability matrix, SPEC target note, example provider
+
 ## Phases 6–9 (plan in detail when reached)
 
 - [ ] P6 multimodal input (needs P5 parts)

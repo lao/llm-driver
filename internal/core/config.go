@@ -15,6 +15,10 @@ const (
 	ProviderClaude Provider = "claude"
 	// ProviderOpenAI selects OpenAI.
 	ProviderOpenAI Provider = "openai"
+	// ProviderOpenCode selects the local opencode agent CLI. opencode fronts
+	// many upstream providers, so its model is a "provider/model" id obtained
+	// from `opencode models` (see ListModels).
+	ProviderOpenCode Provider = "opencode"
 )
 
 // Flavor identifies how a provider is invoked.
@@ -56,7 +60,7 @@ type CodexOptions struct {
 
 // Config selects a provider, transport flavor, and model for a Client.
 type Config struct {
-	// Provider selects Claude or OpenAI.
+	// Provider selects Claude, OpenAI, or opencode.
 	Provider Provider
 	// Flavor selects the hosted API or locally authenticated CLI.
 	Flavor Flavor
@@ -71,7 +75,7 @@ type Config struct {
 	// HTTPClient optionally overrides the API flavor's HTTP client.
 	HTTPClient *http.Client
 
-	// CLIPath optionally overrides the default claude or codex executable.
+	// CLIPath optionally overrides the default claude, codex, or opencode executable.
 	CLIPath string
 	// CLIArgs appends direct arguments to the selected CLI command.
 	CLIArgs []string
@@ -91,11 +95,14 @@ type Config struct {
 }
 
 func (c Config) validate() error {
-	if c.Provider != ProviderClaude && c.Provider != ProviderOpenAI {
-		return fmt.Errorf("%w: provider must be %q or %q", ErrInvalidConfig, ProviderClaude, ProviderOpenAI)
+	if c.Provider != ProviderClaude && c.Provider != ProviderOpenAI && c.Provider != ProviderOpenCode {
+		return fmt.Errorf("%w: provider must be %q, %q, or %q", ErrInvalidConfig, ProviderClaude, ProviderOpenAI, ProviderOpenCode)
 	}
 	if c.Flavor != FlavorAPI && c.Flavor != FlavorCLI {
 		return fmt.Errorf("%w: flavor must be %q or %q", ErrInvalidConfig, FlavorAPI, FlavorCLI)
+	}
+	if c.Provider == ProviderOpenCode && c.Flavor != FlavorCLI {
+		return fmt.Errorf("%w: opencode only supports the CLI flavor", ErrInvalidConfig)
 	}
 	// CLI flavors may omit Model: the provider CLI then runs on its own
 	// account default. API flavors require an explicit model.

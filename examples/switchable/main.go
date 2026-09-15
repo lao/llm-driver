@@ -89,8 +89,8 @@ func generateStream(ctx context.Context, client *llmdriver.Client, request llmdr
 func parseOptions(args []string, output io.Writer) (parsedOptions, error) {
 	flags := flag.NewFlagSet("switchable", flag.ContinueOnError)
 	flags.SetOutput(output)
-	providerValue := flags.String("provider", "", "provider: claude or openai (required)")
-	flavorValue := flags.String("flavor", "", "flavor: api or cli (required)")
+	providerValue := flags.String("provider", "", "provider: claude, openai, or opencode (required)")
+	flavorValue := flags.String("flavor", "", "flavor: api or cli (required; opencode is cli only)")
 	model := flags.String("model", "", "provider model name (required)")
 	prompt := flags.String("prompt", "", "text prompt to send (required)")
 	maxTokens := flags.Int("max-tokens", defaultMaxTokens, "maximum output tokens (API flavors; default 1024)")
@@ -103,12 +103,12 @@ func parseOptions(args []string, output io.Writer) (parsedOptions, error) {
 	stop := flags.String("stop", "", "comma-separated stop sequences (claude/api only)")
 	user := flags.String("user", "", "end-user identifier for abuse tracking (API flavors)")
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: switchable --provider <claude|openai> --flavor <api|cli> --model <name> --prompt <text> [--max-tokens <n>] [--stream] [--schema <file>] [--effort <level>] [--temperature <n>] [--top-p <n>] [--top-k <n>] [--stop <a,b>] [--user <id>]")
+		fmt.Fprintln(output, "Usage: switchable --provider <claude|openai|opencode> --flavor <api|cli> --model <name> --prompt <text> [--max-tokens <n>] [--stream] [--schema <file>] [--effort <level>] [--temperature <n>] [--top-p <n>] [--top-k <n>] [--stop <a,b>] [--user <id>]")
 		fmt.Fprintln(output)
 		flags.PrintDefaults()
 		fmt.Fprintln(output, "\nAuthentication:")
 		fmt.Fprintln(output, "  API: set ANTHROPIC_API_KEY or OPENAI_API_KEY.")
-		fmt.Fprintln(output, "  CLI: use your existing local claude or codex login.")
+		fmt.Fprintln(output, "  CLI: use your existing local claude, codex, or opencode login.")
 	}
 
 	if err := flags.Parse(args); err != nil {
@@ -125,6 +125,9 @@ func parseOptions(args []string, output io.Writer) (parsedOptions, error) {
 	flavor, err := parseFlavor(*flavorValue)
 	if err != nil {
 		return parsedOptions{}, err
+	}
+	if provider == llmdriver.ProviderOpenCode && flavor != llmdriver.FlavorCLI {
+		return parsedOptions{}, errors.New("opencode provider supports only --flavor cli")
 	}
 	if strings.TrimSpace(*model) == "" {
 		return parsedOptions{}, errors.New("--model is required")
@@ -189,10 +192,12 @@ func parseProvider(value string) (llmdriver.Provider, error) {
 		return llmdriver.ProviderClaude, nil
 	case string(llmdriver.ProviderOpenAI):
 		return llmdriver.ProviderOpenAI, nil
+	case string(llmdriver.ProviderOpenCode):
+		return llmdriver.ProviderOpenCode, nil
 	case "":
 		return "", errors.New("--provider is required")
 	default:
-		return "", fmt.Errorf("invalid --provider %q: use claude or openai", value)
+		return "", fmt.Errorf("invalid --provider %q: use claude, openai, or opencode", value)
 	}
 }
 

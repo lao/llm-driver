@@ -18,6 +18,7 @@ var matrixColumns = []matrixTarget{
 	{ProviderOpenAI, FlavorAPI},
 	{ProviderClaude, FlavorCLI},
 	{ProviderOpenAI, FlavorCLI},
+	{ProviderOpenCode, FlavorCLI},
 }
 
 // matrixRows maps each gated Feature to its README matrix row label.

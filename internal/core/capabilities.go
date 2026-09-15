@@ -61,11 +61,12 @@ type target struct {
 	flavor   Flavor
 }
 
-// effortFull is every Effort value; claude/api, claude/cli, and codex/cli accept
-// it (verified against anthropic-sdk-go OutputConfigEffort, `claude --effort`
-// help, and Codex's pass-through -c config). effortToHigh caps openai/api at
-// EffortHigh: the neutral superset is Anthropic-style and OpenAI's Responses
-// reasoning.effort tops out at high for these values.
+// effortFull is every Effort value; claude/api, claude/cli, codex/cli, and
+// opencode/cli accept it (verified against anthropic-sdk-go OutputConfigEffort,
+// `claude --effort` help, Codex's pass-through -c config, and opencode's
+// pass-through --variant). effortToHigh caps openai/api at EffortHigh: the
+// neutral superset is Anthropic-style and OpenAI's Responses reasoning.effort
+// tops out at high for these values.
 var (
 	effortFull   = effortSet(EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax)
 	effortToHigh = effortSet(EffortLow, EffortMedium, EffortHigh)
@@ -106,6 +107,10 @@ var featureSupport = map[target]map[Feature]map[Effort]bool{
 		FeatureUserID:           {},
 	},
 	{ProviderOpenAI, FlavorCLI}: {
+		FeatureStructuredOutput: {},
+		FeatureReasoningEffort:  effortFull,
+	},
+	{ProviderOpenCode, FlavorCLI}: {
 		FeatureStructuredOutput: {},
 		FeatureReasoningEffort:  effortFull,
 	},

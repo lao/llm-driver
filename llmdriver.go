@@ -64,6 +64,9 @@ const (
 	ProviderClaude = core.ProviderClaude
 	// ProviderOpenAI selects OpenAI.
 	ProviderOpenAI = core.ProviderOpenAI
+	// ProviderOpenCode selects the local opencode agent CLI. Its model is a
+	// "provider/model" id from `opencode models` (see ListModels).
+	ProviderOpenCode = core.ProviderOpenCode
 	// FlavorAPI invokes a provider's hosted API through its official Go SDK.
 	FlavorAPI = core.FlavorAPI
 	// FlavorCLI invokes the provider's locally authenticated command-line tool.
