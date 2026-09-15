@@ -4,7 +4,6 @@ package backends
 
 import (
 	"errors"
-	"log/slog"
 	"os"
 	"os/exec"
 	"syscall"
@@ -37,11 +36,5 @@ func reapCommandGroup(command *exec.Cmd) {
 	if command.Process == nil {
 		return
 	}
-	err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
-	if err != nil && !errors.Is(err, syscall.ESRCH) {
-		slog.Warn("reapCommandGroup: unexpected error killing process group",
-			"pgid", command.Process.Pid,
-			"error", err,
-		)
-	}
+	_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
 }
