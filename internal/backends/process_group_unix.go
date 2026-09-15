@@ -23,6 +23,11 @@ func configureCommand(command *exec.Cmd) {
 // reapCommandGroup kills anything still running in the command's process group
 // after it exits, so a provider CLI that spawned a background child cannot leave
 // it running past the call. It is a no-op when the process never started.
+//
+// NOTE: After Wait returns the process-group leader's PID is free for reuse.
+// If it is recycled as a new group leader before this kill, an unrelated group
+// would be hit. The window is extremely narrow and the same pattern exists in
+// configureCommand.Cancel.
 func reapCommandGroup(command *exec.Cmd) {
 	if command.Process == nil {
 		return
