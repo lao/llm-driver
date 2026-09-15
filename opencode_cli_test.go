@@ -309,6 +309,33 @@ func TestOpenCodeCLIErrors(t *testing.T) {
 	}
 }
 
+func TestOpenCodeCLINonzeroExitPreservesTruncatedJSONDiagnostic(t *testing.T) {
+	t.Parallel()
+
+	stdout := `{"type":"error","error":{"name":"ProviderError","data":{"message":"upstream unavailable"}`
+	runner := &fakeCommandRunner{stdout: []byte(stdout), exitCode: 17}
+	client, err := newClient(Config{
+		Provider: ProviderOpenCode,
+		Flavor:   FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	_, err = client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("Hello")}})
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("Generate() error = %T %v, want *Error", err, err)
+	}
+	if target.Status != 17 {
+		t.Fatalf("status = %d, want %d", target.Status, 17)
+	}
+	if !strings.Contains(target.Message, "upstream unavailable") {
+		t.Fatalf("message = %q, want diagnostic from stdout %q", target.Message, stdout)
+	}
+}
+
 // openCodeStepFinish is a terminal event with no text, for error-path fixtures.
 const openCodeStepFinish = `{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_finish","type":"step-finish","reason":"stop","tokens":{}}}`
 

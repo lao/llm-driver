@@ -240,23 +240,39 @@ func parseOpenCodeOutput(output []byte, model string, schema *core.OutputSchema)
 }
 
 // openCodeDiagnostic returns the error event a failed run printed on stdout, or
-// nil when the output carries no error event.
+// a parse error when stdout contains no recoverable event.
 func openCodeDiagnostic(output []byte) *core.Error {
 	scanner := bufio.NewScanner(bytes.NewReader(output))
 	scanner.Buffer(make([]byte, 64*1024), maxOpenCodeEventSize)
+	var decodeErr error
 	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
 		var event openCodeEvent
-		if err := json.Unmarshal(bytes.TrimSpace(scanner.Bytes()), &event); err != nil {
+		if err := json.Unmarshal(line, &event); err != nil {
+			if decodeErr == nil {
+				decodeErr = fmt.Errorf("decode opencode diagnostic %q: %w", string(line), err)
+			}
 			continue
 		}
 		if event.Type == "error" {
 			return openCodeFailureError(event, "generate")
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return openCodeParseError("generate", fmt.Errorf("scan opencode diagnostic: %w", err))
+	}
+	if decodeErr != nil {
+		diagnostic := openCodeParseError("generate", decodeErr)
+		diagnostic.Message = fmt.Sprintf("opencode diagnostic output: %q", string(output))
+		return diagnostic
+	}
 	return nil
 }
 
-func openCodeParseError(operation string, err error) error {
+func openCodeParseError(operation string, err error) *core.Error {
 	return &core.Error{
 		Provider:  core.ProviderOpenCode,
 		Flavor:    core.FlavorCLI,
