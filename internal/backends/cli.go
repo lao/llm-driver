@@ -17,6 +17,11 @@ import (
 )
 
 const (
+	// maxCLIOutputBytes caps each of stdout and stderr for a CLI invocation.
+	// 64 MiB accommodates large model responses (e.g. multi-file code generation)
+	// that exceeded the previous 16 MiB limit.  boundedBuffer allocates on
+	// demand, so idle calls pay no memory cost; in the worst case a runaway CLI
+	// can force 128 MiB into the heap (64 MiB × 2 streams) before being cut off.
 	maxCLIOutputBytes   = 64 << 20
 	cliCommandWaitDelay = 250 * time.Millisecond
 	// cliFailDrainTimeout bounds the best-effort drain-and-stamp on the failure

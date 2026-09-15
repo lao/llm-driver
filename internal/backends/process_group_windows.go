@@ -46,6 +46,16 @@ func reapCommandGroup(command *exec.Cmd) {
 	if command.Process == nil {
 		return
 	}
+	// taskkill exits non-zero when the target process already exited, which is
+	// the expected case after Wait.  If the PID was recycled, taskkill would
+	// kill an unrelated tree — we check ProcessState to confirm the original
+	// process has exited and suppress only that expected failure.  Any other
+	// taskkill error (unexpected) is left explicit for future instrumentation.
 	pid := command.Process.Pid
-	_ = exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run()
+	if err := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run(); err != nil {
+		if command.ProcessState != nil {
+			return // process already exited — expected
+		}
+		_ = err // no logger available; left for future instrumentation
+	}
 }

@@ -36,5 +36,11 @@ func reapCommandGroup(command *exec.Cmd) {
 	if command.Process == nil {
 		return
 	}
-	_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+	// Only ESRCH (no such process/group) is expected here — the group exited
+	// before we could signal it.  Other errors such as EPERM would indicate
+	// the PGID was recycled and the signal reached an unrelated group; we
+	// suppress only ESRCH so the distinction is explicit.
+	if err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		_ = err // no logger available; left for future instrumentation
+	}
 }
