@@ -33,7 +33,9 @@ type (
 	// Response is a provider-neutral text generation result.
 	Response = core.Response
 	// Error adds target and operation context to configuration and runtime
-	// failures.
+	// failures. For CLI targets, process-exit errors use a nonzero Status with
+	// empty Reason and Code; API/result errors populate at least one of those
+	// fields.
 	Error = core.Error
 	// Chunk is one incremental piece of a streaming response.
 	Chunk = core.Chunk
@@ -85,6 +87,9 @@ const (
 	CompletionReasonToolUse = core.CompletionReasonToolUse
 	// CompletionReasonContentFilter indicates that a content filter stopped generation.
 	CompletionReasonContentFilter = core.CompletionReasonContentFilter
+	// CodeMissingFinalMessage identifies a completed Codex CLI turn that emitted
+	// no completed agent message.
+	CodeMissingFinalMessage = core.CodeMissingFinalMessage
 
 	// EffortLow requests the lowest reasoning effort.
 	EffortLow = core.EffortLow

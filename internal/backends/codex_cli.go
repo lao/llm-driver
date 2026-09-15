@@ -384,7 +384,7 @@ func codexCLIOutcomeError(operation string, completed bool, hasFinalMessage bool
 	case !completed:
 		return codexCLIResultError(operation, "missing_turn_completion", "Codex CLI output did not complete a turn")
 	case !hasFinalMessage:
-		return codexCLIResultError(operation, "missing_final_message", "Codex CLI output did not contain a completed agent message")
+		return codexCLIResultError(operation, core.CodeMissingFinalMessage, "Codex CLI output did not contain a completed agent message")
 	}
 	return nil
 }

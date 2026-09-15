@@ -285,7 +285,7 @@ func TestCodexCLIErrors(t *testing.T) {
 				"{\"type\":\"item.completed\",\"item\":{\"id\":\"reason-1\",\"type\":\"reasoning\",\"text\":\"thinking\"}}\n" +
 					"{\"type\":\"turn.completed\",\"usage\":{}}\n",
 			)},
-			wantCode: "missing_final_message",
+			wantCode: CodeMissingFinalMessage,
 		},
 		{
 			name:     "missing turn completion",

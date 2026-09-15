@@ -18,7 +18,13 @@ var (
 	ErrUnsupportedFeature = errors.New("llmdriver: unsupported feature")
 )
 
+// CodeMissingFinalMessage identifies a completed Codex CLI turn that emitted
+// no completed agent message.
+const CodeMissingFinalMessage = "missing_final_message"
+
 // Error adds target and operation context to configuration and runtime failures.
+// For CLI targets, process-exit errors use a nonzero Status with empty Reason
+// and Code; API/result errors populate at least one of those fields.
 type Error struct {
 	// Provider identifies the failing provider, when known.
 	Provider Provider
