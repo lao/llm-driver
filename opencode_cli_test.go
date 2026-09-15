@@ -336,6 +336,20 @@ func TestOpenCodeCLINonzeroExitPreservesTruncatedJSONDiagnostic(t *testing.T) {
 	}
 }
 
+func TestOpenCodeCLIOmitsModelWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{stdout: []byte(openCodeSuccessOutput("ok"))}
+	client, err := newClient(Config{Provider: ProviderOpenCode, Flavor: FlavorCLI}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	if _, err := client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	runner.assertCall(t, "opencode", []string{"run", "--format", "json"}, "q")
+}
+
 // openCodeStepFinish is a terminal event with no text, for error-path fixtures.
 const openCodeStepFinish = `{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_finish","type":"step-finish","reason":"stop","tokens":{}}}`
 

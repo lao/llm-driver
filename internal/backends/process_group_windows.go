@@ -32,6 +32,12 @@ func configureCommand(command *exec.Cmd) {
 
 // reapCommandGroup terminates any descendants left after the command exits, so
 // a provider CLI cannot leave a background process running past the call.
+//
+// NOTE: Because this runs after Wait returns, the PID is free for reuse. On
+// Windows, PID recycling can be fast, and if the PID is reassigned between
+// Wait and the taskkill invocation an unrelated process tree would be killed.
+// The race window is extremely narrow and mirrors configureCommand.Cancel.
+// Eliminating it would require a Windows job object, which is out of scope.
 func reapCommandGroup(command *exec.Cmd) {
 	if command.Process == nil {
 		return

@@ -83,7 +83,10 @@ func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request)
 
 // commandArgs builds the argv shared by the batch and streaming paths.
 func (b *openCodeCLIBackend) commandArgs(request core.Request) []string {
-	args := []string{"run", "--format", "json", "--model", b.model}
+	args := []string{"run", "--format", "json"}
+	if b.model != "" {
+		args = append(args, "--model", b.model)
+	}
 	if request.Effort != "" {
 		// Core validated the value; opencode forwards --variant to the provider.
 		args = append(args, "--variant", string(request.Effort))

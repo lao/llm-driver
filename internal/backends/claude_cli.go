@@ -299,6 +299,8 @@ func claudeCompletionReason(stopReason string) core.CompletionReason {
 		return core.CompletionReasonRefusal
 	case "max_tokens":
 		return core.CompletionReasonMaxTokens
+	case "":
+		return ""
 	default:
 		return core.CompletionReasonStop
 	}
