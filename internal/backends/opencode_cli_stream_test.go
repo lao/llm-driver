@@ -116,6 +116,29 @@ func TestOpenCodeCLIStreamSuccess(t *testing.T) {
 	if response.Usage != wantUsage {
 		t.Fatalf("usage = %+v, want %+v", response.Usage, wantUsage)
 	}
+	if response.CompletionReason != core.CompletionReasonStop {
+		t.Fatalf("completion reason = %q, want %q", response.CompletionReason, core.CompletionReasonStop)
+	}
+}
+
+func TestOpenCodeCompletionReason(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		reason string
+		want   core.CompletionReason
+	}{
+		{reason: "stop", want: core.CompletionReasonStop},
+		{reason: "tool-calls", want: core.CompletionReasonToolUse},
+		{reason: "length", want: core.CompletionReasonMaxTokens},
+		{reason: "", want: ""},
+		{reason: "future-reason", want: ""},
+	}
+	for _, test := range tests {
+		if got := openCodeCompletionReason(test.reason); got != test.want {
+			t.Fatalf("openCodeCompletionReason(%q) = %q, want %q", test.reason, got, test.want)
+		}
+	}
 }
 
 func TestOpenCodeCLIStreamStructuredOutput(t *testing.T) {
@@ -168,6 +191,7 @@ func TestOpenCodeCLIStreamErrors(t *testing.T) {
 		wantIs     error
 		wantStatus int
 		wantCode   string
+		wantReason string
 		startFails bool
 	}{
 		{
@@ -208,9 +232,19 @@ func TestOpenCodeCLIStreamErrors(t *testing.T) {
 			wantCode: "missing_step_finish",
 		},
 		{
-			name:     "missing text",
-			runner:   &fakeStreamingRunner{lines: openCodeStreamLines()[3:]},
-			wantCode: "missing_text",
+			name:       "missing text",
+			runner:     &fakeStreamingRunner{lines: openCodeStreamLines()[3:]},
+			wantCode:   "missing_text",
+			wantReason: "stop",
+		},
+		{
+			name: "tool call ended without text",
+			runner: &fakeStreamingRunner{lines: []string{
+				`{"type":"tool_use","sessionID":"ses_1","part":{"type":"tool","tool":"glob","state":{"status":"completed"}}}`,
+				`{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_1","type":"step-finish","reason":"tool-calls","tokens":{}}}`,
+			}},
+			wantCode:   core.CodeToolCalls,
+			wantReason: "tool-calls",
 		},
 	}
 
@@ -249,6 +283,9 @@ func TestOpenCodeCLIStreamErrors(t *testing.T) {
 			}
 			if target.Status != test.wantStatus || target.Code != test.wantCode {
 				t.Fatalf("status/code = %d/%q, want %d/%q", target.Status, target.Code, test.wantStatus, test.wantCode)
+			}
+			if target.Reason != test.wantReason {
+				t.Fatalf("reason = %q, want %q", target.Reason, test.wantReason)
 			}
 			if test.wantIs != nil && !errors.Is(err, test.wantIs) {
 				t.Fatalf("stream error = %v, want errors.Is(%v)", err, test.wantIs)

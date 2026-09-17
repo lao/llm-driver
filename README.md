@@ -374,7 +374,12 @@ the hosted APIs:
 - Claude CLI runs in single-shot print mode with the default permission mode,
   so a headless run cannot approve agent tool actions. Codex runs with a
   read-only sandbox; opencode runs non-interactively without `--auto`. Agent
-  CLI behavior can still differ from a hosted model endpoint.
+  CLI behavior can still differ from a hosted model endpoint. An opencode turn
+  the model ends on a tool call — commonly a permission auto-reject — fails with
+  code `tool_calls` (carrying the CLI's stderr diagnostic) instead of surfacing
+  as a generic empty response. A turn the provider stopped on its output cap
+  reports `CompletionReasonMaxTokens` on the response, and carries
+  `Reason: "length"` on the error when the cap was reached before any text.
 - System text is passed through Claude's system-prompt flag and Codex's
   per-invocation developer-instructions setting. opencode has no system flag, so
   system text is prefixed to the prompt. Conversation text stays on stdin. System

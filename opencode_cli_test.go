@@ -124,6 +124,45 @@ func TestOpenCodeCLISuccessConcatenatesTextPartsAndUsage(t *testing.T) {
 	if response.Usage != wantUsage {
 		t.Fatalf("usage = %+v, want %+v", response.Usage, wantUsage)
 	}
+	if response.CompletionReason != CompletionReasonStop {
+		t.Fatalf("completion reason = %q, want %q", response.CompletionReason, CompletionReasonStop)
+	}
+}
+
+// TestOpenCodeCLITruncatedResponseReportsMaxTokens confirms a run that hits the
+// provider's output cap is not reported as a clean stop: the step_finish reason
+// reaches the response as CompletionReasonMaxTokens, so a caller can tell a
+// truncated answer from a finished one even though text was delivered.
+func TestOpenCodeCLITruncatedResponseReportsMaxTokens(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{stdout: []byte(
+		`{"type":"text","sessionID":"ses_1","part":{"id":"prt_1","type":"text","text":"partial ans"}}` + "\n" +
+			`{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_2","type":"step-finish","reason":"length",` +
+			`"tokens":{"input":19,"output":32000}}}` + "\n",
+	)}
+	client, err := newClient(Config{
+		Provider: ProviderOpenCode,
+		Flavor:   FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	response, err := client.Generate(context.Background(), Request{
+		MaxTokens: 32,
+		Messages:  []Message{User("Hello")},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if response.Text != "partial ans" {
+		t.Fatalf("text = %q, want the truncated answer", response.Text)
+	}
+	if response.CompletionReason != CompletionReasonMaxTokens {
+		t.Fatalf("completion reason = %q, want %q", response.CompletionReason, CompletionReasonMaxTokens)
+	}
 }
 
 // TestOpenCodeCLITextPartsAreCumulative confirms a re-emitted part id is not
@@ -226,6 +265,7 @@ func TestOpenCodeCLIErrors(t *testing.T) {
 		wantIs      error
 		wantStatus  int
 		wantCode    string
+		wantReason  string
 		wantMessage string
 	}{
 		{
@@ -269,9 +309,19 @@ func TestOpenCodeCLIErrors(t *testing.T) {
 			wantCode: "missing_step_finish",
 		},
 		{
-			name:     "missing text",
-			runner:   &fakeCommandRunner{stdout: []byte(openCodeStepFinish + "\n")},
-			wantCode: "missing_text",
+			name:       "missing text",
+			runner:     &fakeCommandRunner{stdout: []byte(openCodeStepFinish + "\n")},
+			wantCode:   "missing_text",
+			wantReason: "stop",
+		},
+		{
+			name: "tool call ended without text",
+			runner: &fakeCommandRunner{stdout: []byte(
+				`{"type":"tool_use","sessionID":"ses_1","part":{"type":"tool","tool":"glob","state":{"status":"completed"}}}` + "\n" +
+					openCodeToolCallStepFinish + "\n",
+			)},
+			wantCode:   CodeToolCalls,
+			wantReason: "tool-calls",
 		},
 	}
 
@@ -298,6 +348,9 @@ func TestOpenCodeCLIErrors(t *testing.T) {
 			}
 			if target.Status != test.wantStatus || target.Code != test.wantCode {
 				t.Fatalf("status/code = %d/%q, want %d/%q", target.Status, target.Code, test.wantStatus, test.wantCode)
+			}
+			if target.Reason != test.wantReason {
+				t.Fatalf("reason = %q, want %q", target.Reason, test.wantReason)
 			}
 			if test.wantMessage != "" && target.Message != test.wantMessage {
 				t.Fatalf("message = %q, want %q", target.Message, test.wantMessage)
@@ -352,6 +405,43 @@ func TestOpenCodeCLIOmitsModelWhenEmpty(t *testing.T) {
 
 // openCodeStepFinish is a terminal event with no text, for error-path fixtures.
 const openCodeStepFinish = `{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_finish","type":"step-finish","reason":"stop","tokens":{}}}`
+
+// openCodeToolCallStepFinish is a terminal event for a turn the agent ended on a
+// tool call, as when a headless run auto-rejects the tool permission.
+const openCodeToolCallStepFinish = `{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_finish","type":"step-finish","reason":"tool-calls","tokens":{}}}`
+
+// TestOpenCodeCLIStderrDiagnosticIsPreserved confirms the batch path keeps the
+// stderr warning opencode prints when it auto-rejects a tool permission, even
+// though the process exits 0. Without it the operator sees only "returned no
+// text" with no explanation.
+func TestOpenCodeCLIStderrDiagnosticIsPreserved(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{
+		stdout: []byte(openCodeToolCallStepFinish + "\n"),
+		stderr: []byte("! permission requested: external_directory (/tmp/*); auto-rejecting\n"),
+	}
+	client, err := newClient(Config{
+		Provider: ProviderOpenCode,
+		Flavor:   FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	_, err = client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}})
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("Generate() error = %T %v, want *Error", err, err)
+	}
+	if target.Code != CodeToolCalls {
+		t.Fatalf("code = %q, want %q", target.Code, CodeToolCalls)
+	}
+	if !strings.Contains(target.Message, "auto-rejecting") {
+		t.Fatalf("message = %q, want it to carry the stderr diagnostic", target.Message)
+	}
+}
 
 // openCodeSuccessOutput renders a text event plus a terminal step_finish.
 func openCodeSuccessOutput(text string) string {

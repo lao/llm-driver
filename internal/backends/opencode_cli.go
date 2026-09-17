@@ -28,6 +28,7 @@ type openCodeEvent struct {
 	Part      struct {
 		ID     string `json:"id"`
 		Text   string `json:"text"`
+		Reason string `json:"reason"`
 		Tokens struct {
 			Input     int `json:"input"`
 			Output    int `json:"output"`
@@ -57,7 +58,7 @@ func newOpenCodeCLIBackend(config cliBackendConfig) *openCodeCLIBackend {
 // real binary so a renamed or removed flag surfaces instead of failing only at
 // runtime.
 func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
-	stdout, err := executeCLI(
+	stdout, stderr, err := executeCLI(
 		ctx,
 		core.ProviderOpenCode,
 		b.path,
@@ -78,7 +79,11 @@ func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request)
 		}
 		return nil, err
 	}
-	return parseOpenCodeOutput(stdout, b.model, request.OutputSchema)
+	response, err := parseOpenCodeOutput(stdout, b.model, request.OutputSchema)
+	if err != nil {
+		return nil, openCodeStderrError(err, stderr)
+	}
+	return response, nil
 }
 
 // commandArgs builds the argv shared by the batch and streaming paths.
@@ -148,6 +153,7 @@ type openCodeParser struct {
 	emitted  map[string]int
 	text     strings.Builder
 	finished bool
+	reason   string
 }
 
 func newOpenCodeParser(model string, schema *core.OutputSchema, operation string) *openCodeParser {
@@ -172,6 +178,7 @@ func (p *openCodeParser) event(line []byte) (string, error) {
 		return p.textDelta(event)
 	case "step_finish":
 		p.finished = true
+		p.reason = event.Part.Reason
 		p.result.Usage = openCodeUsage(event)
 	case "error":
 		return "", openCodeFailureError(event, p.operation)
@@ -202,15 +209,75 @@ func (p *openCodeParser) response() (*core.Response, error) {
 		return nil, openCodeResultError(p.operation, "missing_step_finish", "opencode did not finish a step")
 	}
 	if p.text.Len() == 0 {
-		return nil, openCodeResultError(p.operation, "missing_text", "opencode returned no text")
+		// A terminal step_finish whose reason is tool-calls means the agent
+		// spent the turn on a tool instead of answering — commonly because a
+		// headless run auto-rejected the permission. Report that distinctly so
+		// it is not confused with an empty completion.
+		if p.reason == openCodeReasonToolCalls {
+			err := openCodeResultError(p.operation, core.CodeToolCalls, "opencode ended the turn on a tool call without returning text")
+			err.Reason = p.reason
+			return nil, err
+		}
+		err := openCodeResultError(p.operation, "missing_text", "opencode returned no text")
+		err.Reason = p.reason
+		return nil, err
 	}
 	response := p.result
 	response.Model = p.model
 	response.Text = p.text.String()
+	response.CompletionReason = openCodeCompletionReason(p.reason)
 	if err := setStructuredOutput(&response, p.schema, core.ProviderOpenCode, core.FlavorCLI, p.operation); err != nil {
 		return nil, err
 	}
 	return &response, nil
+}
+
+// openCodeReasonToolCalls is the step_finish reason opencode reports when the
+// agent ended a step to call a tool rather than answer in text.
+const openCodeReasonToolCalls = "tool-calls"
+
+// openCodeReasonLength is the step_finish reason opencode reports when the
+// provider stopped on its output-token cap. A turn that hits it mid-answer can
+// deliver truncated text or, when the cap is reached before the first text
+// part, no text at all — the reason is then the only evidence of truncation,
+// which is why it is surfaced on the error as well as the response.
+const openCodeReasonLength = "length"
+
+// openCodeCompletionReason maps a step_finish reason to the neutral enum,
+// following the API adapters: an unrecognized reason degrades to empty rather
+// than misclassifying.
+func openCodeCompletionReason(reason string) core.CompletionReason {
+	switch reason {
+	case "stop":
+		return core.CompletionReasonStop
+	case openCodeReasonToolCalls:
+		return core.CompletionReasonToolUse
+	case openCodeReasonLength:
+		return core.CompletionReasonMaxTokens
+	default:
+		return ""
+	}
+}
+
+// openCodeStderrError attaches a stderr diagnostic to a result error when one is
+// available. opencode exits 0 after a terminal step_finish even when it
+// auto-rejected a tool permission, leaving the explanation on stderr; without
+// this the error would carry no reason for the missing text.
+func openCodeStderrError(err error, stderr []byte) error {
+	detail := clipMessage(string(stderr))
+	if detail == "" {
+		return err
+	}
+	var target *core.Error
+	if !errors.As(err, &target) {
+		return err
+	}
+	if target.Message == "" {
+		target.Message = detail
+	} else {
+		target.Message += ": " + detail
+	}
+	return err
 }
 
 func openCodeUsage(event openCodeEvent) core.Usage {

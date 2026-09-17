@@ -64,7 +64,7 @@ func (b *codexCLIBackend) Generate(ctx context.Context, request core.Request) (*
 	}
 	defer cleanup()
 
-	stdout, err := executeCLI(
+	stdout, _, err := executeCLI(
 		ctx,
 		core.ProviderOpenAI,
 		b.path,

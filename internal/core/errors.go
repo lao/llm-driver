@@ -22,6 +22,10 @@ var (
 // no completed agent message.
 const CodeMissingFinalMessage = "missing_final_message"
 
+// CodeToolCalls identifies a CLI turn that ended to call a tool without
+// producing response text, as when an agent CLI auto-rejects a tool permission.
+const CodeToolCalls = "tool_calls"
+
 // Error adds target and operation context to configuration and runtime failures.
 // For CLI targets, process-exit errors use a nonzero Status with empty Reason
 // and Code; API/result errors populate at least one of those fields.

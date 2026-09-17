@@ -166,6 +166,15 @@ func TestCommandHelperProcess(t *testing.T) {
 	}
 }
 
+func TestClipMessageStripsANSIColor(t *testing.T) {
+	t.Parallel()
+
+	got := clipMessage("\x1b[93m\x1b[1m! \x1b[0mpermission requested\n")
+	if got != "! permission requested" {
+		t.Fatalf("clipMessage() = %q, want %q", got, "! permission requested")
+	}
+}
+
 func TestCommandOutputIsBounded(t *testing.T) {
 	t.Parallel()
 

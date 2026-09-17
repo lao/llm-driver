@@ -61,7 +61,7 @@ func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (
 	args = appendClaudeSystemArgs(args, request.System, b.claude.ReplaceSystemPrompt)
 	args = append(args, b.args...)
 
-	stdout, err := executeCLI(
+	stdout, _, err := executeCLI(
 		ctx,
 		core.ProviderClaude,
 		b.path,

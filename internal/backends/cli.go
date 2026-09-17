@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -31,9 +32,14 @@ var errCLIOutputTooLarge = errors.New("llmdriver: CLI output exceeds limit")
 // model-sized result or a large stderr dump does not bloat a single log line.
 const maxErrorMessageBytes = 500
 
-// clipMessage trims surrounding whitespace and caps a CLI-derived message on a
-// UTF-8 rune boundary.
+// ansiEscape matches the SGR (color) sequences a CLI writes when it colors its
+// diagnostic output, even when stderr is not a terminal.
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
+// clipMessage strips terminal color codes, trims surrounding whitespace, and
+// caps a CLI-derived message on a UTF-8 rune boundary.
 func clipMessage(s string) string {
+	s = ansiEscape.ReplaceAllString(s, "")
 	s = strings.TrimSpace(s)
 	if len(s) <= maxErrorMessageBytes {
 		return s
@@ -134,6 +140,11 @@ func runCLI(
 	return stdout.Bytes(), stderr.Bytes(), 0, err
 }
 
+// executeCLI runs a batch CLI invocation and normalizes launch and exit
+// failures. It returns stdout and stderr even on a nonzero exit, so a caller
+// can surface a diagnostic the CLI printed instead of the generic process
+// error. stderr is returned on success too: an agent CLI can exit 0 after
+// auto-rejecting a tool permission and leave the only explanation on stderr.
 func executeCLI(
 	ctx context.Context,
 	provider core.Provider,
@@ -141,10 +152,10 @@ func executeCLI(
 	args []string,
 	stdin []byte,
 	runner core.CommandRunner,
-) ([]byte, error) {
+) ([]byte, []byte, error) {
 	stdout, stderr, exitCode, err := runner(ctx, name, args, stdin)
 	if err != nil {
-		return nil, &core.Error{
+		return nil, stderr, &core.Error{
 			Provider:  provider,
 			Flavor:    core.FlavorCLI,
 			Operation: "generate",
@@ -157,7 +168,7 @@ func executeCLI(
 		if message == "" {
 			message = "CLI command failed"
 		}
-		return stdout, &core.Error{
+		return stdout, stderr, &core.Error{
 			Provider:  provider,
 			Flavor:    core.FlavorCLI,
 			Operation: "generate",
@@ -165,7 +176,7 @@ func executeCLI(
 			Message:   message,
 		}
 	}
-	return stdout, nil
+	return stdout, stderr, nil
 }
 
 // cliProcess is a running provider CLI whose stdout is consumed incrementally.
