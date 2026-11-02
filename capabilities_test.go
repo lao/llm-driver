@@ -182,19 +182,3 @@ func TestSupportsOpenCodeEffortFollowsModel(t *testing.T) {
 		}
 	}
 }
-
-// TestOpenCodeEffortSupportDependsOnModel pins the model-dependent exception the
-// README matrix note documents.
-func TestOpenCodeEffortSupportDependsOnModel(t *testing.T) {
-	t.Parallel()
-
-	for model, want := range map[string]bool{"": false, "p/m#high": false, "p/m": true} {
-		client, err := New(Config{Provider: ProviderOpenCode, Flavor: FlavorCLI, Model: model})
-		if err != nil {
-			t.Fatalf("New(model %q): %v", model, err)
-		}
-		if got := client.Supports(FeatureReasoningEffort); got != want {
-			t.Errorf("Supports(effort) with model %q = %v, want %v", model, got, want)
-		}
-	}
-}

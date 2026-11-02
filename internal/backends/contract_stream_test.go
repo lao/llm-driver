@@ -183,6 +183,9 @@ func TestContractStreamTruncatedOutputAcrossTargets(t *testing.T) {
 				if response.Text == "" {
 					t.Fatal("Response().Text is empty")
 				}
+				if response.CompletionReason != core.CompletionReasonUnverified {
+					t.Fatalf("CompletionReason = %q, want %q", response.CompletionReason, core.CompletionReasonUnverified)
+				}
 				return
 			}
 			// Output that stops before the target's terminal event is incomplete on
