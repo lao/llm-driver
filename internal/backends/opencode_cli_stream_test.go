@@ -444,3 +444,39 @@ func TestOpenCodeCLIStreamDeliversChunksBeforeExit(t *testing.T) {
 		t.Fatalf("chunks = %#v, response = %+v", chunks, response)
 	}
 }
+
+func TestOpenCodeParserDedupesStepFinishAndRejectsTerminalToolCalls(t *testing.T) {
+	t.Parallel()
+
+	finish := `{"type":"step_finish","part":{"id":"prt_f","reason":"stop","tokens":{"input":4,"output":2}}}`
+	parser := newOpenCodeParser("m", nil, "generate")
+	for _, line := range []string{
+		`{"type":"text","part":{"id":"prt_t","text":"hi"}}`, finish, finish,
+	} {
+		if _, err := parser.event([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := parser.response()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Usage.InputTokens != 4 || response.Usage.OutputTokens != 2 {
+		t.Fatalf("usage double counted: %+v", response.Usage)
+	}
+
+	parser = newOpenCodeParser("m", nil, "generate")
+	for _, line := range []string{
+		`{"type":"text","part":{"id":"prt_t","text":"let me check"}}`,
+		`{"type":"step_finish","part":{"id":"prt_f","reason":"tool-calls"}}`,
+	} {
+		if _, err := parser.event([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err = parser.response()
+	var coreErr *core.Error
+	if !errors.As(err, &coreErr) || coreErr.Code != core.CodeToolCalls {
+		t.Fatalf("want tool_calls error, got %v", err)
+	}
+}

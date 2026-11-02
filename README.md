@@ -396,8 +396,8 @@ the hosted APIs:
   that ends on a tool call **without returning text** — commonly a permission
   auto-reject — fails with code `tool_calls` (carrying the CLI's stderr
   diagnostic) instead of surfacing as a generic empty response. A turn that
-  emits text and then ends on a tool call is a normal response with
-  `CompletionReasonToolUse`. A turn the provider stopped on its output cap
+  emits text and then ends on a tool call fails the same way, since opencode
+  runs its tools itself and never returns `ToolCalls`. A turn the provider stopped on its output cap
   reports `CompletionReasonMaxTokens` on the response, and carries
   `Reason: "length"` on the error when the cap was reached before any text.
   opencode 2.x omits the terminal `step_finish` for a plain text answer, so the

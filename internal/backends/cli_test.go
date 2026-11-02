@@ -180,7 +180,7 @@ func TestClipMessageStripsTerminalEscapes(t *testing.T) {
 		{name: "OSC 0 ST", in: "before\x1b]0;spoofed\x1b\\after", want: "beforeafter"},
 		{name: "DCS", in: "before\x1bP1;2|payload\x1b\\after", want: "beforeafter"},
 		{name: "single ESC", in: "before\x1b(Bafter", want: "beforeafter"},
-		{name: "C0 and C1 controls", in: "a\x01b\x07c\x9bd\te\nf", want: "abcd e f"},
+		{name: "C0 and C1 controls", in: "a\x01b\x07c\u009bd\te\nf", want: "abcd e f"},
 		{name: "unicode separators and bidi", in: "a\u2028b\u202ec\u2066d", want: "a bcd"},
 		{name: "format and tag controls", in: "a\u061Cb\uFEFFc\U000E0041d", want: "abcd"},
 	}

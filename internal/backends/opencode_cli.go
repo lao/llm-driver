@@ -196,6 +196,7 @@ type openCodeParser struct {
 
 	result   core.Response
 	emitted  map[string]int
+	counted  map[string]bool
 	text     strings.Builder
 	finished bool
 	reason   string
@@ -207,6 +208,7 @@ func newOpenCodeParser(model string, schema *core.OutputSchema, operation string
 		schema:    schema,
 		model:     model,
 		emitted:   make(map[string]int),
+		counted:   make(map[string]bool),
 	}
 }
 
@@ -237,7 +239,13 @@ func (p *openCodeParser) event(line []byte) (string, error) {
 		// Each step_finish reports that step's usage. Sum across steps so a
 		// tool-call-then-text turn keeps the tool step's spend; a final text
 		// step without a step_finish contributes nothing (2.x reports none).
-		p.result.Usage = addOpenCodeUsage(p.result.Usage, openCodeUsage(event))
+		// opencode may re-deliver a step_finish, so count each part id once.
+		if id := event.Part.ID; id == "" || !p.counted[id] {
+			if id != "" {
+				p.counted[id] = true
+			}
+			p.result.Usage = addOpenCodeUsage(p.result.Usage, openCodeUsage(event))
+		}
 	case "error":
 		return "", openCodeFailureError(event, p.operation)
 	}
@@ -263,6 +271,13 @@ func (p *openCodeParser) textDelta(event openCodeEvent) (string, error) {
 }
 
 func (p *openCodeParser) response() (*core.Response, error) {
+	// A terminal tool-calls step means the run ended on a tool, not an answer,
+	// even if text came first; opencode never returns the ToolCalls to act on.
+	if p.finished && p.reason == openCodeReasonToolCalls && p.text.Len() > 0 {
+		err := openCodeResultError(p.operation, core.CodeToolCalls, "opencode ended the turn on a tool call after partial text")
+		err.Reason = p.reason
+		return nil, err
+	}
 	if p.text.Len() == 0 {
 		if !p.finished {
 			return nil, openCodeResultError(p.operation, "missing_step_finish", "opencode did not finish a step")
