@@ -576,3 +576,28 @@ func TestOpenCodeDiagnosticClipsWrappedCause(t *testing.T) {
 		t.Fatalf("wrapped cause not clipped: %v", diagnostic)
 	}
 }
+
+// A parser failure mid-stream (an opencode error event) must carry the stderr
+// once the process has exited, like the clean-exit path.
+func TestOpenCodeCLIStreamMidStreamFailureCarriesStderr(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeStreamingRunner{
+		lines:  []string{`{"type":"error","error":{"name":"APIError","data":{"message":"boom"}}}`},
+		stderr: []byte("quota exhausted\n"),
+	}
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderOpenCode,
+		Flavor:   core.FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	stream, err := client.GenerateStream(context.Background(), core.Request{MaxTokens: 32, Messages: []core.Message{core.User("q")}})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+	_, err, _ = collectStream(t, stream)
+	if err == nil || !strings.Contains(err.Error(), "boom") || !strings.Contains(err.Error(), "quota exhausted") {
+		t.Fatalf("stream error = %v, want message and stderr", err)
+	}
+}

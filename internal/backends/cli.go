@@ -439,9 +439,9 @@ type cliChunkStream struct {
 	// stderr is cached by exit() so Finish can attach a clean-exit diagnostic
 	// without waiting on the process a second time.
 	stderr []byte
-	// exited records that exit() observed the process end. Finish only accepts
-	// a text-only turn when this is true; that is the half of "completed process
-	// plus text" the parser cannot see.
+	// exited records that exit() observed the process end. Finish only builds a
+	// response when this is true, for every turn; for a text-only turn it is
+	// the half of "completed process plus text" the parser cannot see.
 	exited bool
 }
 
@@ -552,18 +552,23 @@ func (s *cliChunkStream) Close() error {
 func (s *cliChunkStream) fail(err error) error {
 	s.failure = err
 
-	done := make(chan int, 1)
+	type exitResult struct {
+		code   int
+		stderr []byte
+	}
+	done := make(chan exitResult, 1)
 	go func() {
 		drained, _ := io.Copy(io.Discard, io.LimitReader(s.process.stdout(), maxCLIOutputBytes))
 		if drained >= maxCLIOutputBytes {
-			done <- 0
+			done <- exitResult{}
 			return
 		}
-		exitCode, _, waitErr := s.process.wait()
+		exitCode, stderr, waitErr := s.process.wait()
 		if waitErr != nil {
-			exitCode = 0
+			done <- exitResult{}
+			return
 		}
-		done <- exitCode
+		done <- exitResult{exitCode, stderr}
 	}()
 
 	timer := time.NewTimer(cliFailDrainTimeout)
@@ -571,15 +576,15 @@ func (s *cliChunkStream) fail(err error) error {
 	select {
 	case <-timer.C:
 		return err
-	case exitCode := <-done:
-		if exitCode == 0 {
-			return err
-		}
+	case result := <-done:
 		var contextual *core.Error
-		if errors.As(err, &contextual) && contextual.Status == 0 {
-			contextual.Status = exitCode
+		if result.code != 0 && errors.As(err, &contextual) && contextual.Status == 0 {
+			contextual.Status = result.code
 		}
-		return err
+		// The process ended, so its stderr is available for the same
+		// diagnostic a clean-exit result error carries.
+		s.failure = attachCLIStderr(err, result.stderr)
+		return s.failure
 	}
 }
 
