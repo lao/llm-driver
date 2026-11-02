@@ -459,11 +459,13 @@ func openCodeResultError(operation string, code string, message string) *core.Er
 // openCodeFailureError normalizes an error event. opencode nests the message
 // under error.data.message, with error.message used by some failures.
 func openCodeFailureError(event openCodeEvent, operation string) *core.Error {
-	message := event.Error.Data.Message
-	if strings.TrimSpace(message) == "" {
-		message = event.Error.Message
+	// Sanitize before the empty checks: a message that is only escape
+	// sequences or control bytes becomes empty and must fall through.
+	message := clipMessage(event.Error.Data.Message)
+	if message == "" {
+		message = clipMessage(event.Error.Message)
 	}
-	if strings.TrimSpace(message) == "" {
+	if message == "" {
 		message = "opencode run failed"
 	}
 	code := event.Error.Type
@@ -474,5 +476,5 @@ func openCodeFailureError(event openCodeEvent, operation string) *core.Error {
 		code = "error"
 	}
 	// The message and code are provider/CLI-controlled and reach caller logs.
-	return openCodeResultError(operation, clipMessage(code), clipMessage(message))
+	return openCodeResultError(operation, clipMessage(code), message)
 }

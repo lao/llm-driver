@@ -480,3 +480,14 @@ func TestOpenCodeParserDedupesStepFinishAndRejectsTerminalToolCalls(t *testing.T
 		t.Fatalf("want tool_calls error, got %v", err)
 	}
 }
+
+func TestOpenCodeFailureErrorFallsBackWhenMessageSanitizesEmpty(t *testing.T) {
+	t.Parallel()
+
+	parser := newOpenCodeParser("m", nil, "generate")
+	_, err := parser.event([]byte(`{"type":"error","error":{"name":"X","data":{"message":"\u001b[2J\u0007"},"message":"real reason"}}`))
+	var coreErr *core.Error
+	if !errors.As(err, &coreErr) || coreErr.Message != "real reason" {
+		t.Fatalf("want fallback to error.message, got %v", err)
+	}
+}

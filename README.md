@@ -403,7 +403,9 @@ the hosted APIs:
   opencode 2.x omits the terminal `step_finish` for a plain text answer, so the
   completed process plus text is the finish signal. A text-only turn reports
   `CompletionReasonUnverified` — truncation cannot be ruled out — and zero usage;
-  it cannot report `CompletionReasonMaxTokens`. Callers that require a terminal
+  it cannot report `CompletionReasonMaxTokens`. This is the default because 2.x
+  never emits a terminal `step_finish` for a plain text answer, so failing
+  closed would reject every ordinary response. Callers that require a terminal
   reason can reject an unverified response, while callers that accept text-only
   answers (prbooter) proceed. Usage and a reason are present only when opencode
   emits a `step_finish` (for example between tool calls).
