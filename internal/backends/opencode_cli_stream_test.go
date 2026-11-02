@@ -521,3 +521,12 @@ func TestOpenCodeFailureErrorCodeFallsBackWhenTypeSanitizesEmpty(t *testing.T) {
 		t.Fatalf("want code fallback to name, got %v", err)
 	}
 }
+
+func TestOpenCodeDiagnosticClipsUndecodableOutput(t *testing.T) {
+	t.Parallel()
+
+	diagnostic := openCodeDiagnostic([]byte(strings.Repeat("x", 5*maxErrorMessageBytes)))
+	if diagnostic == nil || len(diagnostic.Message) > maxErrorMessageBytes {
+		t.Fatalf("diagnostic message not clipped: %v", diagnostic)
+	}
+}

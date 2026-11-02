@@ -436,7 +436,7 @@ func openCodeDiagnostic(output []byte) *core.Error {
 	}
 	if decodeErr != nil {
 		diagnostic := openCodeParseError("generate", decodeErr)
-		diagnostic.Message = fmt.Sprintf("opencode diagnostic output: %q", string(output))
+		diagnostic.Message = clipMessage(fmt.Sprintf("opencode diagnostic output: %q", string(output)))
 		return diagnostic
 	}
 	return nil

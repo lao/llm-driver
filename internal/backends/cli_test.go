@@ -271,8 +271,9 @@ func TestAttachCLIStderrKeepsFatalTailOfLongStderr(t *testing.T) {
 func TestClipMessageKeepsJoinersButDropsBidiAndTags(t *testing.T) {
 	t.Parallel()
 
-	got := clipMessage("می‌خواهم 👨‍👩 a‮b\U000E0041c")
-	if want := "می‌خواهم 👨‍👩 abc"; got != want {
+	bidi, tag := string(rune(0x202e)), string(rune(0xE0041))
+	got := clipMessage("a\u200cb \u200d c" + bidi + "d" + tag + "e")
+	if want := "a\u200cb \u200d cde"; got != want {
 		t.Fatalf("clipMessage = %q, want %q", got, want)
 	}
 }
