@@ -515,7 +515,13 @@ func attachCLIStderr(err error, stderr []byte) error {
 	if detail == "" {
 		return err
 	}
-	if contextual.Message == "" {
+	base := contextual.Message
+	if base == "" && contextual.Err != nil {
+		// Error() prefers Message over Err; keep the cause visible next to
+		// the stderr instead of hiding it behind a warning.
+		base = contextual.Err.Error()
+	}
+	if base == "" {
 		contextual.Message = detail
 		return err
 	}
@@ -527,7 +533,7 @@ func attachCLIStderr(err error, stderr []byte) error {
 		contextual.Message = detail
 		return err
 	}
-	contextual.Message = clipMessageTo(contextual.Message, room) + separator + detail
+	contextual.Message = clipMessageTo(base, room) + separator + detail
 	return err
 }
 

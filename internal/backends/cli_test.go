@@ -294,3 +294,12 @@ func TestClipTailToBoundsSanitizedInput(t *testing.T) {
 		t.Fatalf("clipTailTo = %q", got)
 	}
 }
+
+func TestAttachCLIStderrKeepsCauseWhenMessageEmpty(t *testing.T) {
+	t.Parallel()
+
+	err := attachCLIStderr(&core.Error{Err: errors.New("decode: unexpected end of JSON")}, []byte("warning: noisy\n"))
+	if got := err.Error(); !strings.Contains(got, "unexpected end of JSON") || !strings.Contains(got, "warning: noisy") {
+		t.Fatalf("Error() = %q", got)
+	}
+}
