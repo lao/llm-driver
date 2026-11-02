@@ -245,12 +245,10 @@ func (p *openCodeParser) event(line []byte) (string, error) {
 		// opencode may re-deliver a step_finish, so count each part id once. A
 		// finish without an id cannot be deduplicated and is assumed unique (2.x
 		// always sets one).
-		if id := event.Part.ID; id == "" || !p.counted[id] {
-			if id != "" {
-				p.counted[id] = true
-			}
-			p.result.Usage = addOpenCodeUsage(p.result.Usage, openCodeUsage(event))
+		if id := event.Part.ID; id != "" {
+			p.counted[id] = true
 		}
+		p.result.Usage = addOpenCodeUsage(p.result.Usage, openCodeUsage(event))
 	case "error":
 		return "", openCodeFailureError(event, p.operation)
 	}
