@@ -220,11 +220,11 @@ func (p *openCodeParser) event(line []byte) (string, error) {
 	}
 	switch event.Type {
 	case "text":
-		if p.finished && p.emitted[event.Part.ID] < len(event.Part.Text) {
-			// A new step answered after the previous step's finish. That
-			// reason described the prior step (a tool call, say), not the
-			// final text, so it must not become the response's reason. A
-			// re-delivered cumulative part emits no delta and keeps the reason.
+		if _, seen := p.emitted[event.Part.ID]; p.finished && !seen && event.Part.Text != "" {
+			// A new part (a new step) answered after the previous step's
+			// finish. That reason described the prior step (a tool call, say),
+			// not the final text, so it must not become the response's reason.
+			// A re-delivered or still-growing part is the same step and keeps it.
 			p.finished = false
 			p.reason = ""
 		}
@@ -242,7 +242,9 @@ func (p *openCodeParser) event(line []byte) (string, error) {
 		// Each step_finish reports that step's usage. Sum across steps so a
 		// tool-call-then-text turn keeps the tool step's spend; a final text
 		// step without a step_finish contributes nothing (2.x reports none).
-		// opencode may re-deliver a step_finish, so count each part id once.
+		// opencode may re-deliver a step_finish, so count each part id once. A
+		// finish without an id cannot be deduplicated and is assumed unique (2.x
+		// always sets one).
 		if id := event.Part.ID; id == "" || !p.counted[id] {
 			if id != "" {
 				p.counted[id] = true
@@ -434,7 +436,9 @@ func openCodeDiagnostic(output []byte) *core.Error {
 	}
 	if decodeErr != nil {
 		diagnostic := openCodeParseError("generate", decodeErr)
-		diagnostic.Message = clipMessage(fmt.Sprintf("opencode diagnostic output: %q", string(output)))
+		// Quote only a bounded head: %q of up to 64 MiB is wasted work.
+		head := output[:min(len(output), 4*maxErrorMessageBytes)]
+		diagnostic.Message = clipMessage(fmt.Sprintf("opencode diagnostic output: %q", string(head)))
 		return diagnostic
 	}
 	return nil

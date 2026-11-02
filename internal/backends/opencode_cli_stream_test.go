@@ -530,3 +530,22 @@ func TestOpenCodeDiagnosticClipsUndecodableOutput(t *testing.T) {
 		t.Fatalf("diagnostic message not clipped: %v", diagnostic)
 	}
 }
+
+func TestOpenCodeParserGrowingPartKeepsFinishReason(t *testing.T) {
+	t.Parallel()
+
+	parser := newOpenCodeParser("m", nil, "generate")
+	for _, line := range []string{
+		`{"type":"text","part":{"id":"prt_t","text":"cut"}}`,
+		`{"type":"step_finish","part":{"id":"prt_f","reason":"length"}}`,
+		`{"type":"text","part":{"id":"prt_t","text":"cut off"}}`,
+	} {
+		if _, err := parser.event([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := parser.response()
+	if err != nil || response.CompletionReason != core.CompletionReasonMaxTokens {
+		t.Fatalf("response = %+v, err = %v", response, err)
+	}
+}
