@@ -50,7 +50,7 @@ func TestOpenCodeCLICommand(t *testing.T) {
 			wantPrompt: "Be concise.\n\nUser: First\n\nAssistant: Second\n\nUser: Third",
 		},
 		{
-			name: "reasoning effort maps to --variant",
+			name: "reasoning effort is encoded in the model id",
 			config: Config{
 				Provider: ProviderOpenCode,
 				Flavor:   FlavorCLI,
@@ -58,7 +58,30 @@ func TestOpenCodeCLICommand(t *testing.T) {
 			},
 			request:    Request{MaxTokens: 32, Messages: []Message{User("q")}, Effort: EffortHigh},
 			wantPath:   "opencode",
-			wantArgs:   []string{"run", "--format", "json", "--model", "anthropic/claude-sonnet-4-5", "--variant", "high"},
+			wantArgs:   []string{"run", "--format", "json", "--model", "anthropic/claude-sonnet-4-5#high"},
+			wantPrompt: "q",
+		},
+		{
+			name: "model that already names a variant is left alone",
+			config: Config{
+				Provider: ProviderOpenCode,
+				Flavor:   FlavorCLI,
+				Model:    "anthropic/claude-sonnet-4-5#low",
+			},
+			request:    Request{MaxTokens: 32, Messages: []Message{User("q")}, Effort: EffortHigh},
+			wantPath:   "opencode",
+			wantArgs:   []string{"run", "--format", "json", "--model", "anthropic/claude-sonnet-4-5#low"},
+			wantPrompt: "q",
+		},
+		{
+			name: "effort without a named model is dropped, not sent as --variant",
+			config: Config{
+				Provider: ProviderOpenCode,
+				Flavor:   FlavorCLI,
+			},
+			request:    Request{MaxTokens: 32, Messages: []Message{User("q")}, Effort: EffortHigh},
+			wantPath:   "opencode",
+			wantArgs:   []string{"run", "--format", "json"},
 			wantPrompt: "q",
 		},
 	}
@@ -126,6 +149,41 @@ func TestOpenCodeCLISuccessConcatenatesTextPartsAndUsage(t *testing.T) {
 	}
 	if response.CompletionReason != CompletionReasonStop {
 		t.Fatalf("completion reason = %q, want %q", response.CompletionReason, CompletionReasonStop)
+	}
+}
+
+// TestOpenCodeCLITextOnlyRunWithoutStepFinishCompletes covers the opencode 2.x
+// stream: a plain text answer ends after the text part, with no terminal
+// step_finish. A completed process with text is the finish signal; usage and
+// completion reason are simply unavailable.
+func TestOpenCodeCLITextOnlyRunWithoutStepFinishCompletes(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{stdout: []byte(
+		`{"type":"step_start","sessionID":"ses_1","part":{"id":"prt_1","type":"step-start"}}` + "\n" +
+			`{"type":"text","sessionID":"ses_1","part":{"id":"prt_2","type":"text","text":"finished answer"}}` + "\n",
+	)}
+	client, err := newClient(Config{
+		Provider: ProviderOpenCode,
+		Flavor:   FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	response, err := client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if response.Text != "finished answer" {
+		t.Fatalf("Text = %q, want %q", response.Text, "finished answer")
+	}
+	if response.CompletionReason != "" {
+		t.Fatalf("CompletionReason = %q, want empty when opencode omits step_finish", response.CompletionReason)
+	}
+	if response.Usage != (Usage{}) {
+		t.Fatalf("Usage = %+v, want zero when opencode omits step_finish", response.Usage)
 	}
 }
 
@@ -302,11 +360,6 @@ func TestOpenCodeCLIErrors(t *testing.T) {
 			runner:      &fakeCommandRunner{stdout: []byte(`{"type":"error","sessionID":"ses_1","error":{"name":"ProviderError","data":{"message":"model unavailable"}}}` + "\n")},
 			wantCode:    "ProviderError",
 			wantMessage: "model unavailable",
-		},
-		{
-			name:     "missing step finish",
-			runner:   &fakeCommandRunner{stdout: []byte(`{"type":"text","sessionID":"ses_1","part":{"id":"p","type":"text","text":"orphan"}}` + "\n")},
-			wantCode: "missing_step_finish",
 		},
 		{
 			name:       "missing text",

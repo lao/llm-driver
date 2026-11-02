@@ -20,8 +20,10 @@ type openCodeCLIBackend struct {
 }
 
 // openCodeEvent is one `opencode run --format json` line. Text parts carry the
-// answer; step_finish carries usage; error carries a failed run. Unknown types
-// are ignored.
+// answer; step_finish carries usage and a completion reason when opencode emits
+// one; error carries a failed run. Unknown types are ignored. opencode 2.x
+// omits the terminal step_finish for a plain text answer, so its absence after
+// text is not an error.
 type openCodeEvent struct {
 	Type      string `json:"type"`
 	SessionID string `json:"sessionID"`
@@ -88,13 +90,17 @@ func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request)
 
 // commandArgs builds the argv shared by the batch and streaming paths.
 func (b *openCodeCLIBackend) commandArgs(request core.Request) []string {
-	args := []string{"run", "--format", "json"}
-	if b.model != "" {
-		args = append(args, "--model", b.model)
+	// opencode 2.x dropped --variant: the variant is a suffix of the model id.
+	// A model already carrying a variant is left untouched, and an effort with
+	// no named model is dropped because 2.x has no way to attach it to the
+	// default model. Callers warn about that at configuration time.
+	model := b.model
+	if request.Effort != "" && model != "" && !strings.Contains(model, "#") {
+		model += "#" + string(request.Effort)
 	}
-	if request.Effort != "" {
-		// Core validated the value; opencode forwards --variant to the provider.
-		args = append(args, "--variant", string(request.Effort))
+	args := []string{"run", "--format", "json"}
+	if model != "" {
+		args = append(args, "--model", model)
 	}
 	return append(args, b.args...)
 }
@@ -205,10 +211,10 @@ func (p *openCodeParser) textDelta(event openCodeEvent) (string, error) {
 }
 
 func (p *openCodeParser) response() (*core.Response, error) {
-	if !p.finished {
-		return nil, openCodeResultError(p.operation, "missing_step_finish", "opencode did not finish a step")
-	}
 	if p.text.Len() == 0 {
+		if !p.finished {
+			return nil, openCodeResultError(p.operation, "missing_step_finish", "opencode did not finish a step")
+		}
 		// A terminal step_finish whose reason is tool-calls means the agent
 		// spent the turn on a tool instead of answering — commonly because a
 		// headless run auto-rejected the permission. Report that distinctly so
@@ -222,6 +228,10 @@ func (p *openCodeParser) response() (*core.Response, error) {
 		err.Reason = p.reason
 		return nil, err
 	}
+	// opencode 2.x ends a plain text turn without a terminal step_finish. The
+	// completed process plus text is the finish signal in that case; usage and
+	// the completion reason are only known when a step_finish was emitted (for
+	// example between tool calls).
 	response := p.result
 	response.Model = p.model
 	response.Text = p.text.String()

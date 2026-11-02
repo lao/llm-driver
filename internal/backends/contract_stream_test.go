@@ -169,8 +169,24 @@ func TestContractStreamTruncatedOutputAcrossTargets(t *testing.T) {
 
 			for stream.Next() {
 			}
+			// opencode 2.x has no terminal event for a plain text answer: the
+			// truncated fixture is indistinguishable from a complete one, so it
+			// must parse instead of reporting a missing step.
+			if target.provider == core.ProviderOpenCode {
+				if err := stream.Err(); err != nil {
+					t.Fatalf("opencode 2.x text-only stream error = %v, want nil", err)
+				}
+				response, err := stream.Response()
+				if err != nil {
+					t.Fatalf("Response(): %v", err)
+				}
+				if response.Text == "" {
+					t.Fatal("Response().Text is empty")
+				}
+				return
+			}
 			// Output that stops before the target's terminal event is incomplete on
-			// every target, so no target may report it as a finished response.
+			// every other target, so no target may report it as a finished response.
 			err = stream.Err()
 			if err == nil {
 				_, err = stream.Response()

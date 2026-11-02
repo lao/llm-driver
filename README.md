@@ -296,7 +296,9 @@ does not accept with `ErrUnsupportedFeature` naming the value and target.
 rejected there; the other targets accept the full set. Each target maps the level
 natively: `claude/api` via `output_config.effort`, `openai/api` via
 `reasoning.effort`, `claude/cli` via `--effort`, `codex/cli` via
-`-c model_reasoning_effort`, and `opencode/cli` via `--variant`.
+`-c model_reasoning_effort`, and `opencode/cli` as the `#variant` suffix of the
+model id (`opencode run --model provider/model#variant`). opencode 1.x is not
+supported.
 
 The example accepts a level via `--effort`:
 
@@ -380,6 +382,10 @@ the hosted APIs:
   as a generic empty response. A turn the provider stopped on its output cap
   reports `CompletionReasonMaxTokens` on the response, and carries
   `Reason: "length"` on the error when the cap was reached before any text.
+  opencode 2.x omits the terminal `step_finish` for a plain text answer, so the
+  completed process plus text is the finish signal; usage and completion reason
+  are present only when opencode emits a `step_finish` (for example between tool
+  calls). A text-only turn therefore cannot report `CompletionReasonMaxTokens`.
 - System text is passed through Claude's system-prompt flag and Codex's
   per-invocation developer-instructions setting. opencode has no system flag, so
   system text is prefixed to the prompt. Conversation text stays on stdin. System

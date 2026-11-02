@@ -41,6 +41,14 @@ func TestOpenCodeCLIStreamCommand(t *testing.T) {
 			wantPrompt: "Hello from stdin",
 		},
 		{
+			name:       "reasoning effort is encoded in the model id",
+			config:     core.Config{Provider: core.ProviderOpenCode, Flavor: core.FlavorCLI, Model: "anthropic/claude-sonnet-4-5"},
+			request:    core.Request{MaxTokens: 32, Messages: []core.Message{core.User("q")}, Effort: core.EffortHigh},
+			wantPath:   "opencode",
+			wantArgs:   []string{"run", "--format", "json", "--model", "anthropic/claude-sonnet-4-5#high"},
+			wantPrompt: "q",
+		},
+		{
 			name: "system and multi turn with custom CLI settings",
 			config: core.Config{
 				Provider: core.ProviderOpenCode,
@@ -118,6 +126,43 @@ func TestOpenCodeCLIStreamSuccess(t *testing.T) {
 	}
 	if response.CompletionReason != core.CompletionReasonStop {
 		t.Fatalf("completion reason = %q, want %q", response.CompletionReason, core.CompletionReasonStop)
+	}
+}
+
+// TestOpenCodeCLIStreamTextOnlyCompletes covers the opencode 2.x stream: the
+// process ends after the text part with no terminal step_finish. The stream
+// must return the text rather than a missing_step_finish error.
+func TestOpenCodeCLIStreamTextOnlyCompletes(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeStreamingRunner{lines: []string{
+		`{"type":"step_start","sessionID":"ses_123","part":{"id":"prt_1","type":"step-start"}}`,
+		`{"type":"text","sessionID":"ses_123","part":{"id":"prt_2","type":"text","text":"finished answer"}}`,
+	}}
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderOpenCode,
+		Flavor:   core.FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+
+	stream, err := client.GenerateStream(context.Background(), core.Request{
+		MaxTokens: 32,
+		Messages:  []core.Message{core.User("Hello")},
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+
+	_, err, response := collectStream(t, stream)
+	if err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	if response.Text != "finished answer" {
+		t.Fatalf("Text = %q, want %q", response.Text, "finished answer")
+	}
+	if response.CompletionReason != "" || response.Usage != (core.Usage{}) {
+		t.Fatalf("response = %+v, want no reason or usage without step_finish", response)
 	}
 }
 
@@ -225,11 +270,6 @@ func TestOpenCodeCLIStreamErrors(t *testing.T) {
 				`{"type":"error","sessionID":"ses_1","error":{"name":"ProviderError","data":{"message":"model unavailable"}}}`,
 			}},
 			wantCode: "ProviderError",
-		},
-		{
-			name:     "missing step finish",
-			runner:   &fakeStreamingRunner{lines: openCodeStreamLines()[:3]},
-			wantCode: "missing_step_finish",
 		},
 		{
 			name:       "missing text",
