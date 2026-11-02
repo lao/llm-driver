@@ -187,6 +187,34 @@ func TestOpenCodeCLITextOnlyRunWithoutStepFinishCompletes(t *testing.T) {
 	}
 }
 
+// TestOpenCodeCLIEffortAppearsInResponseModel pins that the effective model is
+// the same string the CLI ran: the variant suffix belongs to the response model
+// too, so callers do not report a bare id for a variant run.
+func TestOpenCodeCLIEffortAppearsInResponseModel(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{stdout: []byte(openCodeSuccessOutput("ok"))}
+	client, err := newClient(Config{
+		Provider: ProviderOpenCode,
+		Flavor:   FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	response, err := client.Generate(context.Background(), Request{
+		MaxTokens: 32,
+		Messages:  []Message{User("q")},
+		Effort:    EffortHigh,
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if response.Model != "anthropic/claude-sonnet-4-5#high" {
+		t.Fatalf("response model = %q, want the effective model with #high", response.Model)
+	}
+}
+
 // TestOpenCodeCLITruncatedResponseReportsMaxTokens confirms a run that hits the
 // provider's output cap is not reported as a clean stop: the step_finish reason
 // reaches the response as CompletionReasonMaxTokens, so a caller can tell a
@@ -360,6 +388,14 @@ func TestOpenCodeCLIErrors(t *testing.T) {
 			runner:      &fakeCommandRunner{stdout: []byte(`{"type":"error","sessionID":"ses_1","error":{"name":"ProviderError","data":{"message":"model unavailable"}}}` + "\n")},
 			wantCode:    "ProviderError",
 			wantMessage: "model unavailable",
+		},
+		{
+			name: "opencode 2.x error event",
+			runner: &fakeCommandRunner{stdout: []byte(
+				`{"type":"error","sessionID":"ses_1","error":{"type":"provider.no-route","message":"Variant unavailable for p/m: bogus"}}` + "\n",
+			)},
+			wantCode:    "provider.no-route",
+			wantMessage: "Variant unavailable for p/m: bogus",
 		},
 		{
 			name:       "missing text",

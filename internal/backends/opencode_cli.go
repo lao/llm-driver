@@ -42,6 +42,9 @@ type openCodeEvent struct {
 		} `json:"tokens"`
 	} `json:"part"`
 	Error struct {
+		// Type is the opencode 2.x error code (for example
+		// "provider.no-route"); Name is the 1.x spelling.
+		Type    string `json:"type"`
 		Name    string `json:"name"`
 		Message string `json:"message"`
 		Data    struct {
@@ -81,23 +84,28 @@ func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request)
 		}
 		return nil, err
 	}
-	response, err := parseOpenCodeOutput(stdout, b.model, request.OutputSchema)
+	response, err := parseOpenCodeOutput(stdout, openCodeModel(b.model, request.Effort), request.OutputSchema)
 	if err != nil {
 		return nil, openCodeStderrError(err, stderr)
 	}
 	return response, nil
 }
 
+// openCodeModel returns the model id opencode 2.x actually runs: the variant is
+// a suffix of the model id. A model already carrying a variant is left
+// untouched, and an effort with no named model is dropped because 2.x has no
+// way to attach it to the default model. Callers warn about that at
+// configuration time.
+func openCodeModel(model string, effort core.Effort) string {
+	if effort != "" && model != "" && !strings.Contains(model, "#") {
+		return model + "#" + string(effort)
+	}
+	return model
+}
+
 // commandArgs builds the argv shared by the batch and streaming paths.
 func (b *openCodeCLIBackend) commandArgs(request core.Request) []string {
-	// opencode 2.x dropped --variant: the variant is a suffix of the model id.
-	// A model already carrying a variant is left untouched, and an effort with
-	// no named model is dropped because 2.x has no way to attach it to the
-	// default model. Callers warn about that at configuration time.
-	model := b.model
-	if request.Effort != "" && model != "" && !strings.Contains(model, "#") {
-		model += "#" + string(request.Effort)
-	}
+	model := openCodeModel(b.model, request.Effort)
 	args := []string{"run", "--format", "json"}
 	if model != "" {
 		args = append(args, "--model", model)
@@ -122,7 +130,7 @@ func (b *openCodeCLIBackend) GenerateStream(ctx context.Context, request core.Re
 	return newCLIChunkStream(
 		core.ProviderOpenCode,
 		process,
-		newOpenCodeParser(b.model, request.OutputSchema, "generate_stream"),
+		newOpenCodeParser(openCodeModel(b.model, request.Effort), request.OutputSchema, "generate_stream"),
 	), nil
 }
 
@@ -381,7 +389,10 @@ func openCodeFailureError(event openCodeEvent, operation string) *core.Error {
 	if strings.TrimSpace(message) == "" {
 		message = "opencode run failed"
 	}
-	code := event.Error.Name
+	code := event.Error.Type
+	if code == "" {
+		code = event.Error.Name
+	}
 	if code == "" {
 		code = "error"
 	}
