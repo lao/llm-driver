@@ -550,19 +550,27 @@ func TestOpenCodeParserGrowingPartKeepsFinishReason(t *testing.T) {
 	}
 }
 
-func TestOpenCodeParserUnrecognizedFinishReasonIsUnverified(t *testing.T) {
+func TestOpenCodeParserErrorFinishAfterTextFailsAndUnknownReasonIsUnverified(t *testing.T) {
 	t.Parallel()
 
-	parser := newOpenCodeParser("m", nil, "generate")
-	for _, line := range []string{
-		`{"type":"text","part":{"id":"prt_t","text":"partial"}}`,
-		`{"type":"step_finish","part":{"id":"prt_f","reason":"error"}}`,
-	} {
-		if _, err := parser.event([]byte(line)); err != nil {
-			t.Fatal(err)
+	run := func(reason string) (*core.Response, error) {
+		parser := newOpenCodeParser("m", nil, "generate")
+		for _, line := range []string{
+			`{"type":"text","part":{"id":"prt_t","text":"partial"}}`,
+			`{"type":"step_finish","part":{"id":"prt_f","reason":"` + reason + `"}}`,
+		} {
+			if _, err := parser.event([]byte(line)); err != nil {
+				t.Fatal(err)
+			}
 		}
+		return parser.response()
 	}
-	response, err := parser.response()
+	_, err := run("error")
+	var coreErr *core.Error
+	if !errors.As(err, &coreErr) || coreErr.Code != "step_error" {
+		t.Fatalf("want step_error, got %v", err)
+	}
+	response, err := run("other")
 	if err != nil || response.CompletionReason != core.CompletionReasonUnverified {
 		t.Fatalf("response = %+v, err = %v", response, err)
 	}

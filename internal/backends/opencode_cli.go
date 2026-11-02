@@ -281,6 +281,12 @@ func (p *openCodeParser) response() (*core.Response, error) {
 		err.Reason = p.reason
 		return nil, err
 	}
+	// An explicit error finish is a failure signal even when text came first.
+	if p.finished && p.reason == openCodeReasonError && p.text.Len() > 0 {
+		err := openCodeResultError(p.operation, "step_error", "opencode ended the turn on an error after partial text")
+		err.Reason = p.reason
+		return nil, err
+	}
 	if p.text.Len() == 0 {
 		if !p.finished {
 			return nil, openCodeResultError(p.operation, "missing_step_finish", "opencode did not finish a step")
@@ -330,6 +336,10 @@ func (p *openCodeParser) response() (*core.Response, error) {
 // openCodeReasonToolCalls is the step_finish reason opencode reports when the
 // agent ended a step to call a tool rather than answer in text.
 const openCodeReasonToolCalls = "tool-calls"
+
+// openCodeReasonError is the AI SDK finish reason for a step that ended on a
+// provider error.
+const openCodeReasonError = "error"
 
 // openCodeReasonContentFilter is the AI SDK finish reason opencode reports when
 // the provider filtered the response.

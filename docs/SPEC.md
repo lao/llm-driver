@@ -24,7 +24,8 @@ model or a model that already names a variant is rejected with
 override an inline variant. A plain text turn may omit the terminal
 `step_finish`; a completed process plus text is the finish signal, and it
 reports `CompletionReasonUnverified` so callers can tell the finish was not
-verified. A tool-only turn reports `tool_calls`.
+verified. A tool-only turn fails with a `tool_calls` error, and a step that finishes
+on `error` after partial text fails with a `step_error` error.
 
 Scope decision (approved): **generation parity only.** Platform APIs that a
 CLI can never serve (embeddings, batches, files CRUD, audio, images
