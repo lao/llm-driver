@@ -232,6 +232,11 @@ func (p *openCodeParser) event(line []byte) (string, error) {
 		}
 		return p.textDelta(event)
 	case "step_finish":
+		if id := event.Part.ID; id != "" && p.counted[id] {
+			// A re-delivered finish must not re-arm stale state (a tool-calls
+			// reason after later text) nor double-count usage.
+			return "", nil
+		}
 		p.finished = true
 		// The reason is provider-controlled and reaches core.Error.Reason on
 		// error paths, so sanitize it once here.

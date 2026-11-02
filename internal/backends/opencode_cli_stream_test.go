@@ -491,3 +491,22 @@ func TestOpenCodeFailureErrorFallsBackWhenMessageSanitizesEmpty(t *testing.T) {
 		t.Fatalf("want fallback to error.message, got %v", err)
 	}
 }
+
+func TestOpenCodeParserRedeliveredToolFinishAfterTextKeepsAnswer(t *testing.T) {
+	t.Parallel()
+
+	toolFinish := `{"type":"step_finish","part":{"id":"prt_f1","reason":"tool-calls"}}`
+	parser := newOpenCodeParser("m", nil, "generate")
+	for _, line := range []string{
+		`{"type":"text","part":{"id":"prt_t1","text":"checking"}}`, toolFinish,
+		`{"type":"text","part":{"id":"prt_t2","text":" done"}}`, toolFinish,
+	} {
+		if _, err := parser.event([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := parser.response()
+	if err != nil || response.Text != "checking done" {
+		t.Fatalf("response = %+v, err = %v", response, err)
+	}
+}
