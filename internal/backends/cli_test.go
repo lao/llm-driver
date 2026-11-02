@@ -256,3 +256,14 @@ func TestAttachCLIStderrKeepsTail(t *testing.T) {
 		t.Fatalf("message length = %d, want <= %d", len(err.(*core.Error).Message), maxErrorMessageBytes)
 	}
 }
+
+func TestAttachCLIStderrKeepsFatalTailOfLongStderr(t *testing.T) {
+	t.Parallel()
+
+	stderr := strings.Repeat("warning: noisy\n", 100) + "fatal: permission rejected"
+	err := attachCLIStderr(&core.Error{Message: "failed"}, []byte(stderr))
+	var coreErr *core.Error
+	if !errors.As(err, &coreErr) || !strings.HasSuffix(coreErr.Message, "fatal: permission rejected") || len(coreErr.Message) > maxErrorMessageBytes {
+		t.Fatalf("want fatal tail within budget, got %q", coreErr.Message)
+	}
+}

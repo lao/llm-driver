@@ -57,6 +57,23 @@ func clipMessageTo(s string, limit int) string {
 	return s[:end]
 }
 
+// clipTailTo is clipMessageTo keeping the end of the text: stderr from agent
+// CLIs puts warnings first and the fatal line last, so the tail is the evidence.
+func clipTailTo(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	s = strings.TrimSpace(sanitizeTerminal(s))
+	if len(s) <= limit {
+		return s
+	}
+	start := len(s) - limit
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return strings.TrimSpace(s[start:])
+}
+
 // sanitizeTerminal removes ECMA-48 escape sequences and control characters from
 // CLI/provider diagnostics before they reach a log line or terminal. It covers
 // CSI (including private parameter bytes), OSC/DCS/SOS/PM/APC through their
@@ -468,7 +485,7 @@ func attachCLIStderr(err error, stderr []byte) error {
 		return err
 	}
 	const separator = ": "
-	detail := clipMessageTo(string(stderr), maxErrorMessageBytes-len(separator))
+	detail := clipTailTo(string(stderr), maxErrorMessageBytes-len(separator))
 	if detail == "" {
 		return err
 	}
