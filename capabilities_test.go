@@ -166,3 +166,19 @@ func wantSupport(mt matrixTarget, feature Feature) bool {
 		return false
 	}
 }
+
+func TestSupportsOpenCodeEffortFollowsModel(t *testing.T) {
+	for model, want := range map[string]bool{
+		"":                          false,
+		"anthropic/claude#high":     false,
+		"anthropic/claude-sonnet-4": true,
+	} {
+		client, err := New(Config{Provider: ProviderOpenCode, Flavor: FlavorCLI, Model: model})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := client.Supports(FeatureReasoningEffort); got != want {
+			t.Errorf("model %q: Supports = %v, want %v", model, got, want)
+		}
+	}
+}

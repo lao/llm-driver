@@ -2,6 +2,7 @@ package llmdriver
 
 import (
 	"context"
+	"strings"
 
 	"github.com/lao/llm-driver/internal/backends"
 	"github.com/lao/llm-driver/internal/core"
@@ -87,6 +88,15 @@ func (c *Client) Generate(ctx context.Context, request Request) (*Response, erro
 // It answers straight from the capability table Generate and GenerateStream
 // validate against; a request exercising only supported features passes that
 // validation, and an unsupported one fails with ErrUnsupportedFeature.
+//
+// One exception depends on the configured model: opencode 2.x encodes effort as
+// the model's #variant suffix, so FeatureReasoningEffort is false for opencode/cli
+// with an empty Model or a Model that already carries a #variant, matching the
+// ErrUnsupportedFeature Generate returns for those configurations.
 func (c *Client) Supports(feature Feature) bool {
+	if feature == FeatureReasoningEffort && c.provider == ProviderOpenCode && c.flavor == FlavorCLI &&
+		(c.model == "" || strings.Contains(c.model, "#")) {
+		return false
+	}
 	return core.Supports(c.provider, c.flavor, feature)
 }

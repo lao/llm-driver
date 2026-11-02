@@ -305,9 +305,9 @@ opencode 2.x has no way to attach an effort to the CLI's default model, so an
 effort with an empty `Config.Model` is rejected with `ErrUnsupportedFeature` —
 set a model to use it. If `Config.Model` already contains a `#variant`,
 `Request.Effort` is rejected for the same reason; put the desired variant in the
-model and leave `Effort` empty. `Supports(FeatureReasoningEffort)` reports the
-target's capability and cannot see the configured model, so for `opencode/cli`
-it is conditional on a `#variant`-free `Config.Model`. When an effort is
+model and leave `Effort` empty. `Client.Supports(FeatureReasoningEffort)` accounts for this and
+returns false for `opencode/cli` with an empty or `#variant`-carrying
+`Config.Model`. When an effort is
 applied, `Response.Model` is the effective id including the `#variant` suffix.
 `Config.Model` should be a base `provider/model` id when you also set `Effort`.
 
