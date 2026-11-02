@@ -424,7 +424,7 @@ func openCodeDiagnostic(output []byte) *core.Error {
 		var event openCodeEvent
 		if err := json.Unmarshal(line, &event); err != nil {
 			if decodeErr == nil {
-				decodeErr = fmt.Errorf("decode opencode diagnostic %q: %w", string(line), err)
+				decodeErr = fmt.Errorf("decode opencode diagnostic %q: %w", clipMessage(string(line)), err)
 			}
 			continue
 		}

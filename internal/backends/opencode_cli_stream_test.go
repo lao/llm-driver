@@ -567,3 +567,12 @@ func TestOpenCodeParserUnrecognizedFinishReasonIsUnverified(t *testing.T) {
 		t.Fatalf("response = %+v, err = %v", response, err)
 	}
 }
+
+func TestOpenCodeDiagnosticClipsWrappedCause(t *testing.T) {
+	t.Parallel()
+
+	diagnostic := openCodeDiagnostic([]byte("{" + strings.Repeat("x", 10*maxErrorMessageBytes)))
+	if diagnostic == nil || diagnostic.Err == nil || len(diagnostic.Err.Error()) > 2*maxErrorMessageBytes {
+		t.Fatalf("wrapped cause not clipped: %v", diagnostic)
+	}
+}
