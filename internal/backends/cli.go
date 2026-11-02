@@ -92,9 +92,10 @@ func sanitizeTerminal(s string) string {
 			switch {
 			case r == '\t' || r == '\n' || r == '\r' || r == 0x2028 || r == 0x2029:
 				b.WriteByte(' ')
-			case unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Bidi_Control, r) || (r >= 0xE0000 && r <= 0xE007F):
+			case (unicode.Is(unicode.Cf, r) && r != 0x200c && r != 0x200d) || unicode.Is(unicode.Bidi_Control, r) || (r >= 0xE0000 && r <= 0xE007F):
 				// Bidi/format controls can visually reorder a log line; the tag
-				// block can hide an invisible payload.
+				// block can hide an invisible payload. ZWNJ/ZWJ are kept: they
+				// carry meaning in several scripts and emoji sequences.
 			case r >= 0x20 && r != 0x7f && !(r >= 0x80 && r <= 0x9f):
 				b.WriteString(s[i : i+size])
 			}

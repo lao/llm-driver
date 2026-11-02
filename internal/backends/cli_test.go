@@ -267,3 +267,12 @@ func TestAttachCLIStderrKeepsFatalTailOfLongStderr(t *testing.T) {
 		t.Fatalf("want fatal tail within budget, got %q", coreErr.Message)
 	}
 }
+
+func TestClipMessageKeepsJoinersButDropsBidiAndTags(t *testing.T) {
+	t.Parallel()
+
+	got := clipMessage("می‌خواهم 👨‍👩 a‮b\U000E0041c")
+	if want := "می‌خواهم 👨‍👩 abc"; got != want {
+		t.Fatalf("clipMessage = %q, want %q", got, want)
+	}
+}

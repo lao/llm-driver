@@ -216,7 +216,9 @@ and target.
 | Conversation continuation by ID | ✗ | ✗ | ✗ | ✗ | ✗ |
 | Token counting | ✗ | ✗ | ✗ | ✗ | ✗ |
 
-Structured output and reasoning effort are supported on every target. Sampling
+Structured output and reasoning effort are supported on every target; the matrix
+assumes a base `Config.Model` for `opencode/cli`, which rejects effort with an
+empty model or one already carrying a `#variant`. Sampling
 params (temperature/top-p) and the end-user ID map on both API flavors, with
 top-k and stop sequences on `claude/api` only (the Responses API lacks both).
 The remaining optional features are not yet implemented, and later releases flip
