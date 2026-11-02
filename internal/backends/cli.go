@@ -276,12 +276,12 @@ func executeCLI(
 			Provider:  provider,
 			Flavor:    core.FlavorCLI,
 			Operation: "generate",
-			Message:   clipMessage(string(stderr)),
+			Message:   clipTailTo(string(stderr), maxErrorMessageBytes),
 			Err:       err,
 		}
 	}
 	if exitCode != 0 {
-		message := clipMessage(string(stderr))
+		message := clipTailTo(string(stderr), maxErrorMessageBytes)
 		if message == "" {
 			message = "CLI command failed"
 		}
@@ -593,10 +593,10 @@ func (s *cliChunkStream) exit() error {
 	s.stderr = stderr
 	s.exited = true
 	if err != nil {
-		return s.streamError(err, clipMessage(string(stderr)))
+		return s.streamError(err, clipTailTo(string(stderr), maxErrorMessageBytes))
 	}
 	if exitCode != 0 {
-		message := clipMessage(string(stderr))
+		message := clipTailTo(string(stderr), maxErrorMessageBytes)
 		if message == "" {
 			message = "CLI command failed"
 		}

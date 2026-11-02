@@ -303,3 +303,16 @@ func TestAttachCLIStderrKeepsCauseWhenMessageEmpty(t *testing.T) {
 		t.Fatalf("Error() = %q", got)
 	}
 }
+
+func TestExecuteCLINonzeroExitKeepsStderrTail(t *testing.T) {
+	t.Parallel()
+
+	stderr := strings.Repeat("warning\n", 1000) + "fatal: boom"
+	runner := func(context.Context, string, []string, []byte) ([]byte, []byte, int, error) {
+		return nil, []byte(stderr), 2, nil
+	}
+	_, _, err := executeCLI(context.Background(), core.ProviderOpenCode, "x", nil, nil, runner)
+	if err == nil || !strings.HasSuffix(err.Error(), "fatal: boom") {
+		t.Fatalf("error = %v, want the stderr tail", err)
+	}
+}
