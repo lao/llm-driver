@@ -316,3 +316,11 @@ func TestExecuteCLINonzeroExitKeepsStderrTail(t *testing.T) {
 		t.Fatalf("error = %v, want the stderr tail", err)
 	}
 }
+
+func TestSanitizeUnterminatedOSCEndsAtNextEscape(t *testing.T) {
+	t.Parallel()
+
+	if got := clipMessage("\x1b]0;title\x1b[31mfatal: boom\x1b[0m"); got != "fatal: boom" {
+		t.Fatalf("clipMessage = %q", got)
+	}
+}

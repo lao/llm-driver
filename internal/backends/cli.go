@@ -150,8 +150,12 @@ func sanitizeTerminal(s string) string {
 					// the following lines (the newline is handled normally).
 					break
 				}
-				if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
-					i += 2
+				if s[i] == 0x1b {
+					if i+1 < len(s) && s[i+1] == '\\' {
+						i += 2
+					}
+					// Any other ESC starts a new sequence: the OSC was
+					// unterminated, so resume normal parsing at that ESC.
 					break
 				}
 				i++
