@@ -2,7 +2,6 @@ package llmdriver
 
 import (
 	"context"
-	"strings"
 
 	"github.com/lao/llm-driver/internal/backends"
 	"github.com/lao/llm-driver/internal/core"
@@ -95,7 +94,7 @@ func (c *Client) Generate(ctx context.Context, request Request) (*Response, erro
 // ErrUnsupportedFeature Generate returns for those configurations.
 func (c *Client) Supports(feature Feature) bool {
 	if feature == FeatureReasoningEffort && c.provider == ProviderOpenCode && c.flavor == FlavorCLI &&
-		(c.model == "" || strings.Contains(c.model, "#")) {
+		!core.OpenCodeAcceptsEffort(c.model) {
 		return false
 	}
 	return core.Supports(c.provider, c.flavor, feature)

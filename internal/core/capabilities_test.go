@@ -155,3 +155,13 @@ func TestCapabilityGatePassesSupportedFeatures(t *testing.T) {
 		t.Fatalf("gate rejected an empty feature set: %v", err)
 	}
 }
+
+func TestOpenCodeAcceptsEffort(t *testing.T) {
+	t.Parallel()
+
+	for model, want := range map[string]bool{"": false, "p/m#high": false, "p/m": true} {
+		if got := OpenCodeAcceptsEffort(model); got != want {
+			t.Errorf("OpenCodeAcceptsEffort(%q) = %v, want %v", model, got, want)
+		}
+	}
+}

@@ -144,7 +144,8 @@ changing the example's generation code.
 
 `opencode` fronts many upstream providers, so its model is a `provider/model`
 id, for example `anthropic/claude-sonnet-4-5` or
-`openrouter/anthropic/claude-sonnet-4.5#high`. `ListModels` runs
+`openrouter/anthropic/claude-sonnet-4.5#high` (a `#variant` pins the effort;
+see Reasoning effort for how that interacts with `Request.Effort`). `ListModels` runs
 `opencode models` and returns every id the installed opencode can actually
 run — opencode resolves its own credentials, provider environment variables,
 and `opencode.json` config:

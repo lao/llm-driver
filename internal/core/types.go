@@ -240,8 +240,9 @@ type Response struct {
 	ID string `json:"id,omitempty"`
 	// Model is the model that produced the response: the configured id, or the
 	// provider-reported name when it differs. opencode 2.x includes the effective
-	// #variant suffix here; Config.Model and ListModels ids are base provider/model
-	// ids.
+	// #variant suffix here. Config.Model should be a base provider/model id when
+	// Request.Effort is set; an id that already carries a #variant (ListModels
+	// may return one) pins the effort and rejects Request.Effort.
 	Model string `json:"model"`
 	// Text is the normalized response text.
 	Text string `json:"text"`

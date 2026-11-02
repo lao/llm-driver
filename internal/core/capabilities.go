@@ -1,6 +1,9 @@
 package core
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Feature identifies an optional generation capability that a target either
 // supports or rejects with ErrUnsupportedFeature. The baseline surface (system,
@@ -121,6 +124,15 @@ var featureSupport = map[target]map[Feature]map[Effort]bool{
 // the unexported backing slice.
 func AllFeatures() []Feature {
 	return append([]Feature(nil), allFeatures...)
+}
+
+// OpenCodeAcceptsEffort reports whether Request.Effort can be expressed for the
+// model: opencode 2.x encodes effort as the model id's #variant suffix, so the
+// model must be set and must not already carry a variant. This is the one
+// definition of that model-dependent rule; Client.Supports and the opencode
+// backend both call it.
+func OpenCodeAcceptsEffort(model string) bool {
+	return model != "" && !strings.Contains(model, "#")
 }
 
 // Supports reports whether the target honors the feature.
