@@ -549,3 +549,21 @@ func TestOpenCodeParserGrowingPartKeepsFinishReason(t *testing.T) {
 		t.Fatalf("response = %+v, err = %v", response, err)
 	}
 }
+
+func TestOpenCodeParserUnrecognizedFinishReasonIsUnverified(t *testing.T) {
+	t.Parallel()
+
+	parser := newOpenCodeParser("m", nil, "generate")
+	for _, line := range []string{
+		`{"type":"text","part":{"id":"prt_t","text":"partial"}}`,
+		`{"type":"step_finish","part":{"id":"prt_f","reason":"error"}}`,
+	} {
+		if _, err := parser.event([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := parser.response()
+	if err != nil || response.CompletionReason != core.CompletionReasonUnverified {
+		t.Fatalf("response = %+v, err = %v", response, err)
+	}
+}

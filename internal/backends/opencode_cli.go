@@ -317,8 +317,9 @@ func (p *openCodeParser) response() (*core.Response, error) {
 	response.Model = p.model
 	response.Text = p.text.String()
 	response.CompletionReason = openCodeCompletionReason(p.reason)
-	if response.CompletionReason == "" && !p.finished {
-		// No terminal step_finish: the answer may be complete, but the library
+	if response.CompletionReason == "" {
+		// No terminal step_finish, or one whose reason is unrecognized (say
+		// "error" or "unknown"): the answer may be complete, but the library
 		// cannot distinguish it from a truncated one.
 		response.CompletionReason = core.CompletionReasonUnverified
 	}
