@@ -237,7 +237,7 @@ func TestOpenCodeCompletionReason(t *testing.T) {
 		want   core.CompletionReason
 	}{
 		{reason: "stop", want: core.CompletionReasonStop},
-		{reason: "tool-calls", want: core.CompletionReasonToolUse},
+		{reason: "tool-calls", want: ""},
 		{reason: "length", want: core.CompletionReasonMaxTokens},
 		{reason: "content-filter", want: core.CompletionReasonContentFilter},
 		{reason: "", want: ""},

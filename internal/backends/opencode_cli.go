@@ -63,7 +63,7 @@ func newOpenCodeCLIBackend(config cliBackendConfig) *openCodeCLIBackend {
 // real binary so a renamed or removed flag surfaces instead of failing only at
 // runtime.
 func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
-	if err := b.validateEffort(request); err != nil {
+	if err := b.validateEffort(request, "generate"); err != nil {
 		return nil, err
 	}
 	stdout, stderr, err := executeCLI(
@@ -99,17 +99,26 @@ func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request)
 // variant already in the model. Rejecting matches the library's contract for
 // unsupported request/target combinations; callers that want to degrade
 // instead must clear Effort before the call.
-func (b *openCodeCLIBackend) validateEffort(request core.Request) error {
+func (b *openCodeCLIBackend) validateEffort(request core.Request, operation string) error {
 	if request.Effort == "" {
 		return nil
 	}
-	if b.model == "" {
-		return fmt.Errorf("%w: opencode effort %q requires Config.Model (2.x encodes it as model#variant)", core.ErrUnsupportedFeature, request.Effort)
+	var message string
+	switch {
+	case b.model == "":
+		message = fmt.Sprintf("opencode effort %q requires Config.Model (2.x encodes it as model#variant)", request.Effort)
+	case strings.Contains(b.model, "#"):
+		message = fmt.Sprintf("opencode effort %q conflicts with the variant already in model %q; put the desired variant in the model and leave Effort empty", request.Effort, b.model)
+	default:
+		return nil
 	}
-	if strings.Contains(b.model, "#") {
-		return fmt.Errorf("%w: opencode effort %q conflicts with the variant already in model %q; put the desired variant in the model and leave Effort empty", core.ErrUnsupportedFeature, request.Effort, b.model)
+	return &core.Error{
+		Provider:  core.ProviderOpenCode,
+		Flavor:    core.FlavorCLI,
+		Operation: operation,
+		Message:   message,
+		Err:       core.ErrUnsupportedFeature,
 	}
-	return nil
 }
 
 // openCodeModel returns the model id opencode 2.x actually runs: the variant is
@@ -135,7 +144,7 @@ func (b *openCodeCLIBackend) commandArgs(request core.Request) []string {
 // GenerateStream reuses the batch invocation and parses the same JSON events as
 // they arrive instead of after the process exits.
 func (b *openCodeCLIBackend) GenerateStream(ctx context.Context, request core.Request) (core.ChunkStream, error) {
-	if err := b.validateEffort(request); err != nil {
+	if err := b.validateEffort(request, "generate_stream"); err != nil {
 		return nil, err
 	}
 	process, err := startCLIStream(
@@ -321,8 +330,9 @@ func openCodeCompletionReason(reason string) core.CompletionReason {
 	switch reason {
 	case "stop":
 		return core.CompletionReasonStop
-	case openCodeReasonToolCalls:
-		return core.CompletionReasonToolUse
+	// tool-calls is deliberately unmapped: opencode runs its tools itself and
+	// never populates Response.ToolCalls, so ToolUse would break the caller's
+	// tool loop. The raw reason still reaches errors via core.Error.Reason.
 	case openCodeReasonLength:
 		return core.CompletionReasonMaxTokens
 	case openCodeReasonContentFilter:
