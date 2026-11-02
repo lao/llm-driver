@@ -211,6 +211,9 @@ func (p *openCodeParser) event(line []byte) (string, error) {
 		p.result.ID = event.SessionID
 	}
 	switch event.Type {
+	case "step_start", "tool_use":
+		p.finished = false
+		p.reason = ""
 	case "text":
 		if _, seen := p.emitted[event.Part.ID]; p.finished && !seen && event.Part.Text != "" {
 			// A new part (a new step) answered after the previous step's

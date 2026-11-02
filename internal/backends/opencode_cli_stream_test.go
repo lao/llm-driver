@@ -609,3 +609,18 @@ func TestOpenCodeCLIStreamMidStreamFailureCarriesStderr(t *testing.T) {
 		t.Fatalf("stream error = %v, want message and stderr", err)
 	}
 }
+
+func TestOpenCodeParserNewStepInvalidatesPreviousFinish(t *testing.T) {
+	for _, event := range []string{`{"type":"step_start"}`, `{"type":"tool_use"}`} {
+		p := newOpenCodeParser("model", nil, "generate")
+		for _, line := range []string{`{"type":"text","part":{"id":"text","text":"answer"}}`, `{"type":"step_finish","part":{"id":"finish","reason":"stop"}}`, event} {
+			if _, err := p.event([]byte(line)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		response, err := p.response()
+		if err != nil || response.CompletionReason != core.CompletionReasonUnverified {
+			t.Fatalf("after %s: response = %+v, error = %v", event, response, err)
+		}
+	}
+}
