@@ -231,3 +231,18 @@ func TestCommandRunnerAppliesEnvAndDir(t *testing.T) {
 		t.Fatalf("stdout = %q, want it to contain %q", stdout, want)
 	}
 }
+
+// Appending stderr must not let a long existing message crowd the diagnostic
+// out of the 500-byte budget: the stderr tail is the evidence the caller needs.
+func TestAttachCLIStderrKeepsTail(t *testing.T) {
+	t.Parallel()
+
+	target := &core.Error{Message: strings.Repeat("m", maxErrorMessageBytes)}
+	err := attachCLIStderr(target, []byte("permission denied"))
+	if len(err.(*core.Error).Message) > maxErrorMessageBytes {
+		t.Fatalf("message length = %d, want <= %d", len(err.(*core.Error).Message), maxErrorMessageBytes)
+	}
+	if !strings.HasSuffix(err.(*core.Error).Message, "permission denied") {
+		t.Fatalf("message = %q, want the stderr tail preserved", err.(*core.Error).Message)
+	}
+}

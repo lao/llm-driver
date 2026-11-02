@@ -36,12 +36,18 @@ const maxErrorMessageBytes = 500
 // surrounding whitespace, and caps a CLI-derived message on a UTF-8 rune
 // boundary.
 func clipMessage(s string) string {
+	return clipMessageTo(s, maxErrorMessageBytes)
+}
+
+// clipMessageTo is clipMessage with an explicit byte budget, used when a
+// diagnostic is appended to existing text.
+func clipMessageTo(s string, limit int) string {
 	s = sanitizeTerminal(s)
 	s = strings.TrimSpace(s)
-	if len(s) <= maxErrorMessageBytes {
+	if len(s) <= limit {
 		return s
 	}
-	end := maxErrorMessageBytes
+	end := limit
 	for end > 0 && !utf8.RuneStart(s[end]) {
 		end--
 	}
@@ -458,13 +464,22 @@ func attachCLIStderr(err error, stderr []byte) error {
 	if !errors.As(err, &contextual) {
 		return err
 	}
-	if detail := clipMessage(string(stderr)); detail != "" {
-		if contextual.Message == "" {
-			contextual.Message = detail
-		} else {
-			contextual.Message = clipMessage(contextual.Message + ": " + detail)
-		}
+	const separator = ": "
+	detail := clipMessageTo(string(stderr), maxErrorMessageBytes-len(separator))
+	if detail == "" {
+		return err
 	}
+	if contextual.Message == "" {
+		contextual.Message = detail
+		return err
+	}
+	// Reserve room for the stderr tail: it is the evidence the caller needs, so
+	// truncating the appended part would defeat the purpose.
+	room := maxErrorMessageBytes - len(detail) - len(separator)
+	if room < 0 {
+		room = 0
+	}
+	contextual.Message = clipMessageTo(contextual.Message, room) + separator + detail
 	return err
 }
 

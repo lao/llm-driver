@@ -345,6 +345,34 @@ func TestOpenCodeCLITextAfterToolStepDoesNotInheritReason(t *testing.T) {
 	}
 }
 
+// A re-delivered cumulative text part after step_finish emits no new delta and
+// must not erase the terminal reason.
+func TestOpenCodeCLIDuplicateTextAfterFinishKeepsReason(t *testing.T) {
+	t.Parallel()
+
+	text := `{"type":"text","sessionID":"ses_1","part":{"id":"prt_1","type":"text","text":"answer"}}`
+	runner := &fakeCommandRunner{stdout: []byte(
+		text + "\n" +
+			`{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_2","type":"step-finish","reason":"stop","tokens":{"input":1,"output":1}}}` + "\n" +
+			text + "\n",
+	)}
+	client, err := newClient(Config{
+		Provider: ProviderOpenCode,
+		Flavor:   FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	response, err := client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if response.CompletionReason != CompletionReasonStop {
+		t.Fatalf("CompletionReason = %q, want %q", response.CompletionReason, CompletionReasonStop)
+	}
+}
+
 // TestOpenCodeCLIEffortAppearsInResponseModel pins that the effective model is
 // the same string the CLI ran: the variant suffix belongs to the response model
 // too, so callers do not report a bare id for a variant run.
@@ -565,6 +593,18 @@ func TestOpenCodeCLIErrors(t *testing.T) {
 			runner:     &fakeCommandRunner{stdout: []byte(openCodeStepFinish + "\n")},
 			wantCode:   "missing_text",
 			wantReason: "stop",
+		},
+		{
+			name:       "no text before the output cap",
+			runner:     &fakeCommandRunner{stdout: []byte(`{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_1","type":"step-finish","reason":"length"}}` + "\n")},
+			wantCode:   "max_tokens",
+			wantReason: "length",
+		},
+		{
+			name:       "no text before a content filter",
+			runner:     &fakeCommandRunner{stdout: []byte(`{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_1","type":"step-finish","reason":"content-filter"}}` + "\n")},
+			wantCode:   "content_filter",
+			wantReason: "content-filter",
 		},
 		{
 			name: "tool call ended without text",

@@ -211,10 +211,11 @@ func (p *openCodeParser) event(line []byte) (string, error) {
 	}
 	switch event.Type {
 	case "text":
-		if p.finished {
+		if p.finished && p.emitted[event.Part.ID] < len(event.Part.Text) {
 			// A new step answered after the previous step's finish. That
 			// reason described the prior step (a tool call, say), not the
-			// final text, so it must not become the response's reason.
+			// final text, so it must not become the response's reason. A
+			// re-delivered cumulative part emits no delta and keeps the reason.
 			p.finished = false
 			p.reason = ""
 		}
@@ -261,8 +262,17 @@ func (p *openCodeParser) response() (*core.Response, error) {
 		// spent the turn on a tool instead of answering — commonly because a
 		// headless run auto-rejected the permission. Report that distinctly so
 		// it is not confused with an empty completion.
-		if p.reason == openCodeReasonToolCalls {
+		switch p.reason {
+		case openCodeReasonToolCalls:
 			err := openCodeResultError(p.operation, core.CodeToolCalls, "opencode ended the turn on a tool call without returning text")
+			err.Reason = p.reason
+			return nil, err
+		case openCodeReasonLength:
+			err := openCodeResultError(p.operation, "max_tokens", "opencode stopped at the output cap before returning text")
+			err.Reason = p.reason
+			return nil, err
+		case openCodeReasonContentFilter:
+			err := openCodeResultError(p.operation, "content_filter", "opencode was filtered before returning text")
 			err.Reason = p.reason
 			return nil, err
 		}
