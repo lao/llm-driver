@@ -412,3 +412,20 @@ func TestClaudeCLIStreamMalformedResultLine(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeCLIResponseSanitizesReasonAndCode(t *testing.T) {
+	_, err := claudeCLIResponse(claudeCLIResult{
+		Type:           "result",
+		Subtype:        "bad\x1b[2Jsub",
+		IsError:        true,
+		TerminalReason: "api\x1b]52;c;SGVsbG8=\x07_error",
+		Result:         "boom",
+	}, "m", "op")
+	var ce *core.Error
+	if !errors.As(err, &ce) {
+		t.Fatalf("want *core.Error, got %v", err)
+	}
+	if ce.Reason != "api_error" || ce.Code != "badsub" {
+		t.Fatalf("reason=%q code=%q", ce.Reason, ce.Code)
+	}
+}

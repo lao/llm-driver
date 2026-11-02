@@ -1,0 +1,12 @@
+{
+  "lastQuery": "loop fix these issues then push to PR and comment \"/review\" wait results, if not >=9 fix and continue, comment and fix, until get a\n  >=9 or 10 rounds on PR 22",
+  "perAgentQuery": {},
+  "graftReads": 0,
+  "sourceReads": 0,
+  "savedTokens": 0,
+  "injectedPointers": [],
+  "nudges": 0,
+  "inputCostMicros": 65359,
+  "inputTokensBilled": 30661,
+  "lastBillingUuid": "df7e77ab-f09f-41fb-8f20-b942ec391fbd"
+}

@@ -272,8 +272,8 @@ func claudeCLIResponse(result claudeCLIResult, model string, operation string) (
 			Flavor:    core.FlavorCLI,
 			Operation: operation,
 			Status:    result.APIErrorStatus,
-			Reason:    result.TerminalReason,
-			Code:      claudeCLIErrorCode(result),
+			Reason:    clipMessage(result.TerminalReason),
+			Code:      clipMessage(claudeCLIErrorCode(result)),
 			Message:   clipMessage(message),
 		}
 	}
