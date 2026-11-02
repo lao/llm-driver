@@ -224,7 +224,7 @@ const (
 	CompletionReasonMaxTokens CompletionReason = "max_tokens"
 	// CompletionReasonRefusal indicates that the model returned a refusal.
 	CompletionReasonRefusal CompletionReason = "refusal"
-	// CompletionReasonToolUse indicates that generation ended to call a tool.
+	// CompletionReasonToolUse indicates that generation ended with a tool call.
 	CompletionReasonToolUse CompletionReason = "tool_use"
 	// CompletionReasonContentFilter indicates that a content filter stopped generation.
 	CompletionReasonContentFilter CompletionReason = "content_filter"
