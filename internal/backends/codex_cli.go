@@ -64,7 +64,7 @@ func (b *codexCLIBackend) Generate(ctx context.Context, request core.Request) (*
 	}
 	defer cleanup()
 
-	stdout, _, err := executeCLI(
+	stdout, stderr, err := executeCLI(
 		ctx,
 		core.ProviderOpenAI,
 		b.path,
@@ -79,17 +79,17 @@ func (b *codexCLIBackend) Generate(ctx context.Context, request core.Request) (*
 			var diagnostic *core.Error
 			if errors.As(diagnosticErr, &diagnostic) && (diagnostic.Code == "turn_failed" || diagnostic.Code == "error") {
 				diagnostic.Status = processError.Status
-				return nil, diagnostic
+				return nil, attachCLIStderr(diagnostic, stderr)
 			}
 		}
 		return nil, err
 	}
 	response, err := parseCodexCLIOutput(stdout, b.model)
 	if err != nil {
-		return nil, err
+		return nil, attachCLIStderr(err, stderr)
 	}
 	if err := setStructuredOutput(response, request.OutputSchema, core.ProviderOpenAI, core.FlavorCLI, "generate"); err != nil {
-		return nil, err
+		return nil, attachCLIStderr(err, stderr)
 	}
 	return response, nil
 }

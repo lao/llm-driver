@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -395,4 +396,27 @@ func TestCodexCLIOmitsModelWhenEmpty(t *testing.T) {
 		t.Fatalf("Generate(): %v", err)
 	}
 	runner.assertCall(t, "codex", []string{"exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", "-"}, "q")
+}
+
+// A clean exit can still end on a parse/result error; the CLI's stderr is the
+// only explanation and must reach the error.
+func TestCodexCLICleanExitCarriesStderr(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{stdout: []byte("not-json\n"), stderr: []byte("permission denied\n")}
+	client, err := newClient(Config{
+		Provider: ProviderOpenAI,
+		Flavor:   FlavorCLI,
+		Model:    "gpt-test",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}})
+	if err == nil {
+		t.Fatal("Generate() succeeded, want a parse error")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("error = %q, want the stderr diagnostic", err)
+	}
 }

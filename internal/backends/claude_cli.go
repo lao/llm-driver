@@ -61,7 +61,7 @@ func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (
 	args = appendClaudeSystemArgs(args, request.System, b.claude.ReplaceSystemPrompt)
 	args = append(args, b.args...)
 
-	stdout, _, err := executeCLI(
+	stdout, stderr, err := executeCLI(
 		ctx,
 		core.ProviderClaude,
 		b.path,
@@ -86,7 +86,7 @@ func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (
 					if diagnostic.Status == 0 {
 						diagnostic.Status = processError.Status
 					}
-					return nil, diagnostic
+					return nil, attachCLIStderr(diagnostic, stderr)
 				}
 			}
 		}
@@ -94,10 +94,10 @@ func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (
 	}
 	response, err := parseClaudeCLIOutput(stdout, b.model)
 	if err != nil {
-		return nil, err
+		return nil, attachCLIStderr(err, stderr)
 	}
 	if err := setStructuredOutput(response, request.OutputSchema, core.ProviderClaude, core.FlavorCLI, "generate"); err != nil {
-		return nil, err
+		return nil, attachCLIStderr(err, stderr)
 	}
 	return response, nil
 }
