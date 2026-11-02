@@ -314,10 +314,12 @@ returns false for `opencode/cli` with an empty or `#variant`-carrying
 applied, `Response.Model` is the effective id including the `#variant` suffix.
 `Config.Model` should be a base `provider/model` id when you also set `Effort`.
 
-**Breaking for opencode 1.x callers:** an effort with an empty `Config.Model`
-was sent as `--variant`; 2.x has no equivalent, so it is now rejected with
-`ErrUnsupportedFeature`. Set a model and put the desired `#variant` in it to keep
-reasoning control.
+**Breaking for opencode 1.x callers:** the driver targets 2.x and no longer
+sends `--variant`. An effort with an empty `Config.Model` is now rejected with
+`ErrUnsupportedFeature`; set a model and put the desired `#variant` in it to keep
+reasoning control. With a model set, the effort is sent as `--model
+provider/model#variant`, a form 1.x may not accept (likely a model-not-found
+error), so 1.x installs must upgrade.
 
 The example accepts a level via `--effort`:
 

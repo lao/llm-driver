@@ -277,3 +277,20 @@ func TestClipMessageKeepsJoinersButDropsBidiAndTags(t *testing.T) {
 		t.Fatalf("clipMessage = %q, want %q", got, want)
 	}
 }
+
+func TestSanitizeUnterminatedOSCKeepsLaterLines(t *testing.T) {
+	t.Parallel()
+
+	if got := clipMessage("\x1b]0;title\nfatal: boom"); got != "fatal: boom" {
+		t.Fatalf("clipMessage = %q", got)
+	}
+}
+
+func TestClipTailToBoundsSanitizedInput(t *testing.T) {
+	t.Parallel()
+
+	got := clipTailTo(strings.Repeat("noise\n", 100000)+"fatal: boom", 20)
+	if !strings.HasSuffix(got, "fatal: boom") || len(got) > 20 {
+		t.Fatalf("clipTailTo = %q", got)
+	}
+}

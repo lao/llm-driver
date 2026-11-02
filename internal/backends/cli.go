@@ -39,11 +39,24 @@ func clipMessage(s string) string {
 	return clipMessageTo(s, maxErrorMessageBytes)
 }
 
+// sanitizeWindowFactor is how many budgets of raw input clipMessageTo and
+// clipTailTo sanitize before clipping.
+const sanitizeWindowFactor = 4
+
 // clipMessageTo is clipMessage with an explicit byte budget, used when a
 // diagnostic is appended to existing text.
 func clipMessageTo(s string, limit int) string {
 	if limit <= 0 {
 		return ""
+	}
+	// Bound the sanitizer's work: escape stripping only shrinks text, so a
+	// generous multiple of the budget still fills it for ordinary output.
+	if w := limit * sanitizeWindowFactor; len(s) > w {
+		end := w
+		for end > 0 && !utf8.RuneStart(s[end]) {
+			end--
+		}
+		s = s[:end]
 	}
 	s = sanitizeTerminal(s)
 	s = strings.TrimSpace(s)
@@ -62,6 +75,13 @@ func clipMessageTo(s string, limit int) string {
 func clipTailTo(s string, limit int) string {
 	if limit <= 0 {
 		return ""
+	}
+	if w := limit * sanitizeWindowFactor; len(s) > w {
+		start := len(s) - w
+		for start < len(s) && !utf8.RuneStart(s[start]) {
+			start++
+		}
+		s = s[start:]
 	}
 	s = strings.TrimSpace(sanitizeTerminal(s))
 	if len(s) <= limit {
@@ -123,6 +143,11 @@ func sanitizeTerminal(s string) string {
 			for i < len(s) {
 				if s[i] == 0x07 {
 					i++
+					break
+				}
+				if s[i] == '\n' {
+					// Unterminated: stop so a malformed sequence cannot erase
+					// the following lines (the newline is handled normally).
 					break
 				}
 				if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
