@@ -161,8 +161,8 @@ func TestOpenCodeCLIStreamTextOnlyCompletes(t *testing.T) {
 	if response.Text != "finished answer" {
 		t.Fatalf("Text = %q, want %q", response.Text, "finished answer")
 	}
-	if response.CompletionReason != "" || response.Usage != (core.Usage{}) {
-		t.Fatalf("response = %+v, want no reason or usage without step_finish", response)
+	if response.CompletionReason != core.CompletionReasonUnverified || response.Usage != (core.Usage{}) {
+		t.Fatalf("response = %+v, want unverified reason and zero usage without step_finish", response)
 	}
 }
 

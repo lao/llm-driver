@@ -228,6 +228,10 @@ const (
 	CompletionReasonToolUse CompletionReason = "tool_use"
 	// CompletionReasonContentFilter indicates that a content filter stopped generation.
 	CompletionReasonContentFilter CompletionReason = "content_filter"
+	// CompletionReasonUnverified indicates that the target did not report a
+	// terminal finish reason, so truncation cannot be ruled out. opencode 2.x
+	// plain text answers are the current case: they end without a step_finish.
+	CompletionReasonUnverified CompletionReason = "unverified"
 )
 
 // Response is a provider-neutral text generation result.

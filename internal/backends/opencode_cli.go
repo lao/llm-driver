@@ -221,7 +221,9 @@ func (p *openCodeParser) event(line []byte) (string, error) {
 		return p.textDelta(event)
 	case "step_finish":
 		p.finished = true
-		p.reason = event.Part.Reason
+		// The reason is provider-controlled and reaches core.Error.Reason on
+		// error paths, so sanitize it once here.
+		p.reason = clipMessage(event.Part.Reason)
 		// Each step_finish reports that step's usage. Sum across steps so a
 		// tool-call-then-text turn keeps the tool step's spend; a final text
 		// step without a step_finish contributes nothing (2.x reports none).
@@ -276,6 +278,11 @@ func (p *openCodeParser) response() (*core.Response, error) {
 	response.Model = p.model
 	response.Text = p.text.String()
 	response.CompletionReason = openCodeCompletionReason(p.reason)
+	if response.CompletionReason == "" && !p.finished {
+		// No terminal step_finish: the answer may be complete, but the library
+		// cannot distinguish it from a truncated one.
+		response.CompletionReason = core.CompletionReasonUnverified
+	}
 	if err := setStructuredOutput(&response, p.schema, core.ProviderOpenCode, core.FlavorCLI, p.operation); err != nil {
 		return nil, err
 	}
@@ -432,5 +439,5 @@ func openCodeFailureError(event openCodeEvent, operation string) *core.Error {
 		code = "error"
 	}
 	// The message and code are provider/CLI-controlled and reach caller logs.
-	return openCodeResultError(operation, sanitizeTerminal(code), clipMessage(message))
+	return openCodeResultError(operation, clipMessage(code), clipMessage(message))
 }

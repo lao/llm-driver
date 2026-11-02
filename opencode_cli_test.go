@@ -134,8 +134,9 @@ func TestOpenCodeCLIErrorEventIsSanitized(t *testing.T) {
 	t.Parallel()
 
 	message := strings.Repeat("x", 1000) + `\u001b]52;c;SGVscG8=\u0007`
+	code := strings.Repeat("y", 1000) + `\u001b[?25l`
 	runner := &fakeCommandRunner{stdout: []byte(
-		`{"type":"error","sessionID":"ses_1","error":{"type":"provider.no-route","data":{"message":"` + message + `"}}}` + "\n",
+		`{"type":"error","sessionID":"ses_1","error":{"type":"` + code + `","data":{"message":"` + message + `"}}}` + "\n",
 	)}
 	client, err := newClient(Config{
 		Provider: ProviderOpenCode,
@@ -158,6 +159,45 @@ func TestOpenCodeCLIErrorEventIsSanitized(t *testing.T) {
 	}
 	if strings.ContainsAny(target.Message, "\x1b\x07") {
 		t.Fatalf("message carries an escape sequence: %q", target.Message)
+	}
+	if len(target.Code) > 500 {
+		t.Fatalf("code length = %d, want <= 500", len(target.Code))
+	}
+	if strings.ContainsAny(target.Code, "\x1b\x07") {
+		t.Fatalf("code carries an escape sequence: %q", target.Code)
+	}
+}
+
+// A provider-controlled step_finish reason is sanitized before it reaches the
+// error's Reason field, which callers log.
+func TestOpenCodeCLIErrorReasonIsSanitized(t *testing.T) {
+	t.Parallel()
+
+	reason := strings.Repeat("z", 1000) + `\u001b]52;c;SGVscG8=\u0007`
+	runner := &fakeCommandRunner{stdout: []byte(
+		`{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_1","type":"step-finish","reason":"` + reason + `"}}` + "\n",
+	)}
+	client, err := newClient(Config{
+		Provider: ProviderOpenCode,
+		Flavor:   FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}})
+	if err == nil {
+		t.Fatal("Generate() succeeded, want an error")
+	}
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("Generate() error = %T %v, want *Error", err, err)
+	}
+	if len(target.Reason) > 500 {
+		t.Fatalf("reason length = %d, want <= 500", len(target.Reason))
+	}
+	if strings.ContainsAny(target.Reason, "\x1b\x07") {
+		t.Fatalf("reason carries an escape sequence: %q", target.Reason)
 	}
 }
 
@@ -264,8 +304,8 @@ func TestOpenCodeCLITextOnlyRunWithoutStepFinishCompletes(t *testing.T) {
 	if response.Text != "finished answer" {
 		t.Fatalf("Text = %q, want %q", response.Text, "finished answer")
 	}
-	if response.CompletionReason != "" {
-		t.Fatalf("CompletionReason = %q, want empty when opencode omits step_finish", response.CompletionReason)
+	if response.CompletionReason != CompletionReasonUnverified {
+		t.Fatalf("CompletionReason = %q, want %q when opencode omits step_finish", response.CompletionReason, CompletionReasonUnverified)
 	}
 	if response.Usage != (Usage{}) {
 		t.Fatalf("Usage = %+v, want zero when opencode omits step_finish", response.Usage)
@@ -300,8 +340,8 @@ func TestOpenCodeCLITextAfterToolStepDoesNotInheritReason(t *testing.T) {
 	if response.Text != "final answer" {
 		t.Fatalf("Text = %q, want the final answer", response.Text)
 	}
-	if response.CompletionReason != "" {
-		t.Fatalf("CompletionReason = %q, want empty; the tool step's reason is stale", response.CompletionReason)
+	if response.CompletionReason != CompletionReasonUnverified {
+		t.Fatalf("CompletionReason = %q, want %q; the tool step's reason is stale", response.CompletionReason, CompletionReasonUnverified)
 	}
 }
 

@@ -88,6 +88,9 @@ const (
 	CompletionReasonToolUse = core.CompletionReasonToolUse
 	// CompletionReasonContentFilter indicates that a content filter stopped generation.
 	CompletionReasonContentFilter = core.CompletionReasonContentFilter
+	// CompletionReasonUnverified means no terminal finish reason was reported;
+	// truncation cannot be ruled out (opencode 2.x text-only turns).
+	CompletionReasonUnverified = core.CompletionReasonUnverified
 	// CodeMissingFinalMessage identifies a completed Codex CLI turn that emitted
 	// no completed agent message.
 	CodeMissingFinalMessage = core.CodeMissingFinalMessage

@@ -22,8 +22,9 @@ suffix (`Response.Model` carries the effective id); an effort with an empty
 model or a model that already names a variant is rejected with
 `ErrUnsupportedFeature`, because 2.x has no default-model form and cannot
 override an inline variant. A plain text turn may omit the terminal
-`step_finish`; a completed process plus text is the finish signal, and a
-tool-only turn reports `tool_calls`.
+`step_finish`; a completed process plus text is the finish signal, and it
+reports `CompletionReasonUnverified` so callers can tell the finish was not
+verified. A tool-only turn reports `tool_calls`.
 
 Scope decision (approved): **generation parity only.** Platform APIs that a
 CLI can never serve (embeddings, batches, files CRUD, audio, images

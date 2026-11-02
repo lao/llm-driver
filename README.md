@@ -399,9 +399,12 @@ the hosted APIs:
   reports `CompletionReasonMaxTokens` on the response, and carries
   `Reason: "length"` on the error when the cap was reached before any text.
   opencode 2.x omits the terminal `step_finish` for a plain text answer, so the
-  completed process plus text is the finish signal; usage and completion reason
-  are present only when opencode emits a `step_finish` (for example between tool
-  calls). A text-only turn therefore cannot report `CompletionReasonMaxTokens`.
+  completed process plus text is the finish signal. A text-only turn reports
+  `CompletionReasonUnverified` — truncation cannot be ruled out — and zero usage;
+  it cannot report `CompletionReasonMaxTokens`. Callers that require a terminal
+  reason can reject an unverified response, while callers that accept text-only
+  answers (prbooter) proceed. Usage and a reason are present only when opencode
+  emits a `step_finish` (for example between tool calls).
 - System text is passed through Claude's system-prompt flag and Codex's
   per-invocation developer-instructions setting. opencode has no system flag, so
   system text is prefixed to the prompt. Conversation text stays on stdin. System
