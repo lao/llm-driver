@@ -186,6 +186,9 @@ func TestContractStreamTruncatedOutputAcrossTargets(t *testing.T) {
 				if response.CompletionReason != core.CompletionReasonUnverified {
 					t.Fatalf("CompletionReason = %q, want %q", response.CompletionReason, core.CompletionReasonUnverified)
 				}
+				if response.Usage != (core.Usage{}) {
+					t.Fatalf("Usage = %+v, want zero for unverified text", response.Usage)
+				}
 				return
 			}
 			// Output that stops before the target's terminal event is incomplete on

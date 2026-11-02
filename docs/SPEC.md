@@ -27,6 +27,22 @@ reports `CompletionReasonUnverified` so callers can tell the finish was not
 verified. A tool-only turn fails with a `tool_calls` error, and a step that finishes
 on `error` after partial text fails with a `step_error` error.
 
+Approved SPEC exception (opencode 2.x): clean-exit text-only responses remain
+successful by default with `CompletionReasonUnverified` and zero usage, even
+though truncation cannot be ruled out. This explicitly exempts that case from
+the fail-loudly/no-truncated-success invariant; it does not certify completeness.
+Security-relevant callers (including automated review/approval consumers) must
+check `CompletionReason` before acting and require `CompletionReasonStop`;
+reject unverified, capped, or otherwise non-stop results and discard streamed
+partial text on error. Consumers that accept unverified text must validate their
+own completeness criteria before using it to authorize an action. This SDK
+cannot enforce checks in downstream consumers.
+
+CLI error messages may include stderr after both nonzero and clean exits.
+Diagnostics are terminal-sanitized and bounded to 500 bytes, but not redacted:
+paths, prompt fragments, and credentials can remain. Callers must filter or
+suppress error text before sending it to logs or other trust domains.
+
 Scope decision (approved): **generation parity only.** Platform APIs that a
 CLI can never serve (embeddings, batches, files CRUD, audio, images
 generation, fine-tuning, vector stores, admin) are permanently out of scope.

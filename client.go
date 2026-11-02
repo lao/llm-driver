@@ -53,7 +53,7 @@ func (c *Client) Generate(ctx context.Context, request Request) (*Response, erro
 			Err:       err,
 		}
 	}
-	if err := core.ValidateRequestFor(c.provider, c.flavor, request); err != nil {
+	if err := core.ValidateRequestFor(c.provider, c.flavor, c.model, request); err != nil {
 		return nil, &Error{
 			Provider:  c.provider,
 			Flavor:    c.flavor,
@@ -93,9 +93,5 @@ func (c *Client) Generate(ctx context.Context, request Request) (*Response, erro
 // with an empty Model or a Model that already carries a #variant, matching the
 // ErrUnsupportedFeature Generate returns for those configurations.
 func (c *Client) Supports(feature Feature) bool {
-	if feature == FeatureReasoningEffort && c.provider == ProviderOpenCode && c.flavor == FlavorCLI &&
-		!core.OpenCodeAcceptsEffort(c.model) {
-		return false
-	}
-	return core.Supports(c.provider, c.flavor, feature)
+	return core.Supports(c.provider, c.flavor, c.model, feature)
 }

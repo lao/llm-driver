@@ -411,8 +411,9 @@ the hosted APIs:
   it cannot report `CompletionReasonMaxTokens`. This is the default because 2.x
   never emits a terminal `step_finish` for a plain text answer, so failing
   closed would reject every ordinary response. Callers that require a terminal
-  reason can reject an unverified response, while callers that accept text-only
-  answers (prbooter) proceed. Usage and a reason are present only when opencode
+  reason must reject an unverified response. Security-relevant consumers must
+  require `CompletionReasonStop` before approval or other actions; consumers
+  accepting text-only answers must validate completeness themselves. Usage and a reason are present only when opencode
   emits a `step_finish` (for example between tool calls).
 - System text is passed through Claude's system-prompt flag and Codex's
   per-invocation developer-instructions setting. opencode has no system flag, so
@@ -421,6 +422,10 @@ the hosted APIs:
 - CLI subprocesses inherit the application's working directory and environment
   so local authentication works. Codex's read-only sandbox prevents writes, not
   reads; isolate the host process when prompts are not trusted.
+- CLI error messages can include stderr even after exit 0. Messages are
+  terminal-sanitized and capped at 500 bytes, but secrets, prompt fragments, and
+  paths are not redacted. Filter or suppress error text before logging or
+  forwarding it across trust boundaries.
 - Usage fields are populated only when a target reports them.
 - Streaming chunk granularity is target-defined, like `MaxTokens`. The hosted
   APIs and `claude -p --output-format stream-json --include-partial-messages`

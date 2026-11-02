@@ -100,23 +100,15 @@ func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request)
 // unsupported request/target combinations; callers that want to degrade
 // instead must clear Effort before the call.
 func (b *openCodeCLIBackend) validateEffort(request core.Request, operation string) error {
-	if request.Effort == "" || core.OpenCodeAcceptsEffort(b.model) {
-		return nil
+	if err := core.ValidateRequestFor(core.ProviderOpenCode, core.FlavorCLI, b.model, request); err != nil {
+		return &core.Error{
+			Provider:  core.ProviderOpenCode,
+			Flavor:    core.FlavorCLI,
+			Operation: operation,
+			Err:       err,
+		}
 	}
-	var message string
-	switch {
-	case b.model == "":
-		message = fmt.Sprintf("opencode effort %q requires Config.Model (2.x encodes it as model#variant)", request.Effort)
-	case strings.Contains(b.model, "#"):
-		message = fmt.Sprintf("opencode effort %q conflicts with the variant already in model %q; put the desired variant in the model and leave Effort empty", request.Effort, b.model)
-	}
-	return &core.Error{
-		Provider:  core.ProviderOpenCode,
-		Flavor:    core.FlavorCLI,
-		Operation: operation,
-		Message:   message,
-		Err:       core.ErrUnsupportedFeature,
-	}
+	return nil
 }
 
 // openCodeModel returns the model id opencode 2.x actually runs: the variant is

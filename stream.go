@@ -36,7 +36,7 @@ func (c *Client) GenerateStream(ctx context.Context, request Request) (*Stream, 
 	if err := core.ValidateRequest(request); err != nil {
 		return nil, c.streamError(err, "")
 	}
-	if err := core.ValidateRequestFor(c.provider, c.flavor, request); err != nil {
+	if err := core.ValidateRequestFor(c.provider, c.flavor, c.model, request); err != nil {
 		return nil, c.streamError(err, "")
 	}
 

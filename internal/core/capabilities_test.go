@@ -47,7 +47,7 @@ func TestSupportsMatchesImplementedFeatures(t *testing.T) {
 
 	for _, tg := range allTargets() {
 		for _, feature := range allFeatures {
-			if got := Supports(tg.provider, tg.flavor, feature); got != wantImplemented(tg, feature) {
+			if got := Supports(tg.provider, tg.flavor, "p/m", feature); got != wantImplemented(tg, feature) {
 				t.Errorf("Supports(%s/%s, %q) = %v, want %v", tg.provider, tg.flavor, feature, got, !got)
 			}
 		}
@@ -91,13 +91,13 @@ func TestEffortAllowedSetsPerTarget(t *testing.T) {
 	for _, test := range tests {
 		for _, value := range test.accepts {
 			request := Request{MaxTokens: 16, Messages: []Message{User("hi")}, Effort: value}
-			if err := ValidateRequestFor(test.tg.provider, test.tg.flavor, request); err != nil {
+			if err := ValidateRequestFor(test.tg.provider, test.tg.flavor, "p/m", request); err != nil {
 				t.Errorf("%s/%s effort %q = %v, want accepted", test.tg.provider, test.tg.flavor, value, err)
 			}
 		}
 		for _, value := range test.rejects {
 			request := Request{MaxTokens: 16, Messages: []Message{User("hi")}, Effort: value}
-			err := ValidateRequestFor(test.tg.provider, test.tg.flavor, request)
+			err := ValidateRequestFor(test.tg.provider, test.tg.flavor, "p/m", request)
 			if !errors.Is(err, ErrUnsupportedFeature) {
 				t.Errorf("%s/%s effort %q = %v, want ErrUnsupportedFeature", test.tg.provider, test.tg.flavor, value, err)
 			}
@@ -117,7 +117,7 @@ func TestEffortRejectsUnknownValue(t *testing.T) {
 
 	request := Request{MaxTokens: 16, Messages: []Message{User("hi")}, Effort: Effort("turbo")}
 	for _, tg := range allTargets() {
-		if err := ValidateRequestFor(tg.provider, tg.flavor, request); !errors.Is(err, ErrUnsupportedFeature) {
+		if err := ValidateRequestFor(tg.provider, tg.flavor, "p/m", request); !errors.Is(err, ErrUnsupportedFeature) {
 			t.Errorf("%s/%s effort %q = %v, want ErrUnsupportedFeature", tg.provider, tg.flavor, request.Effort, err)
 		}
 	}
@@ -128,7 +128,7 @@ func TestValidateRequestForIsNoOpForTodaysRequest(t *testing.T) {
 
 	request := Request{MaxTokens: 16, Messages: []Message{User("hello")}}
 	for _, tg := range allTargets() {
-		if err := ValidateRequestFor(tg.provider, tg.flavor, request); err != nil {
+		if err := ValidateRequestFor(tg.provider, tg.flavor, "p/m", request); err != nil {
 			t.Errorf("ValidateRequestFor(%s/%s) = %v, want nil", tg.provider, tg.flavor, err)
 		}
 	}
@@ -137,7 +137,7 @@ func TestValidateRequestForIsNoOpForTodaysRequest(t *testing.T) {
 func TestCapabilityGateRejectsUnsupportedFeature(t *testing.T) {
 	t.Parallel()
 
-	err := validateFeaturesFor(ProviderClaude, FlavorAPI, []Feature{FeatureWebSearch})
+	err := validateFeaturesFor(ProviderClaude, FlavorAPI, "", []Feature{FeatureWebSearch})
 	if !errors.Is(err, ErrUnsupportedFeature) {
 		t.Fatalf("gate error = %v, want ErrUnsupportedFeature", err)
 	}
@@ -151,7 +151,7 @@ func TestCapabilityGateRejectsUnsupportedFeature(t *testing.T) {
 func TestCapabilityGatePassesSupportedFeatures(t *testing.T) {
 	t.Parallel()
 
-	if err := validateFeaturesFor(ProviderClaude, FlavorAPI, nil); err != nil {
+	if err := validateFeaturesFor(ProviderClaude, FlavorAPI, "", nil); err != nil {
 		t.Fatalf("gate rejected an empty feature set: %v", err)
 	}
 }
@@ -162,6 +162,21 @@ func TestOpenCodeAcceptsEffort(t *testing.T) {
 	for model, want := range map[string]bool{"": false, "p/m#high": false, "p/m": true} {
 		if got := OpenCodeAcceptsEffort(model); got != want {
 			t.Errorf("OpenCodeAcceptsEffort(%q) = %v, want %v", model, got, want)
+		}
+	}
+}
+
+func TestOpenCodeModelCapabilityGate(t *testing.T) {
+	for _, model := range []string{"", "p/m#high", "p/m"} {
+		for _, effort := range []Effort{"", EffortHigh} {
+			want := model == "p/m"
+			if got := Supports(ProviderOpenCode, FlavorCLI, model, FeatureReasoningEffort); got != want {
+				t.Fatalf("model %q: Supports = %v, want %v", model, got, want)
+			}
+			err := ValidateRequestFor(ProviderOpenCode, FlavorCLI, model, Request{Effort: effort})
+			if rejected := errors.Is(err, ErrUnsupportedFeature); rejected != (effort != "" && !want) {
+				t.Fatalf("model %q, effort %q: unexpected error %v", model, effort, err)
+			}
 		}
 	}
 }

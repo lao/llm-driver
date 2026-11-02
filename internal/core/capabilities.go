@@ -129,14 +129,16 @@ func AllFeatures() []Feature {
 // OpenCodeAcceptsEffort reports whether Request.Effort can be expressed for the
 // model: opencode 2.x encodes effort as the model id's #variant suffix, so the
 // model must be set and must not already carry a variant. This is the one
-// definition of that model-dependent rule; Client.Supports and the opencode
-// backend both call it.
+// definition of that model-dependent rule, used by the core capability gate.
 func OpenCodeAcceptsEffort(model string) bool {
 	return model != "" && !strings.Contains(model, "#")
 }
 
 // Supports reports whether the target honors the feature.
-func Supports(provider Provider, flavor Flavor, feature Feature) bool {
+func Supports(provider Provider, flavor Flavor, model string, feature Feature) bool {
+	if provider == ProviderOpenCode && flavor == FlavorCLI && feature == FeatureReasoningEffort && !OpenCodeAcceptsEffort(model) {
+		return false
+	}
 	_, ok := featureSupport[target{provider, flavor}][feature]
 	return ok
 }
@@ -187,9 +189,9 @@ func requestUsesParts(r Request) bool {
 // ValidateRequestFor reports whether the target accepts every feature the
 // request exercises. Generate and GenerateStream call it after ValidateRequest;
 // an unsupported feature returns ErrUnsupportedFeature naming the feature and
-// the target. With today's Request fields it always passes.
-func ValidateRequestFor(provider Provider, flavor Flavor, r Request) error {
-	if err := validateFeaturesFor(provider, flavor, featuresOf(r)); err != nil {
+// the target and configured model.
+func ValidateRequestFor(provider Provider, flavor Flavor, model string, r Request) error {
+	if err := validateFeaturesFor(provider, flavor, model, featuresOf(r)); err != nil {
 		return err
 	}
 	// Valued features: the neutral Effort value must be in the target's allowed
@@ -206,10 +208,16 @@ func ValidateRequestFor(provider Provider, flavor Flavor, r Request) error {
 
 // validateFeaturesFor is the capability gate: it rejects the first feature the
 // target does not support. Split from ValidateRequestFor so the gate can be
-// tested directly while featuresOf still detects nothing.
-func validateFeaturesFor(provider Provider, flavor Flavor, features []Feature) error {
+// tested directly.
+func validateFeaturesFor(provider Provider, flavor Flavor, model string, features []Feature) error {
 	for _, feature := range features {
-		if !Supports(provider, flavor, feature) {
+		if !Supports(provider, flavor, model, feature) {
+			if provider == ProviderOpenCode && flavor == FlavorCLI && feature == FeatureReasoningEffort {
+				if model == "" {
+					return fmt.Errorf("%w: opencode reasoning effort requires Config.Model (2.x encodes it as model#variant)", ErrUnsupportedFeature)
+				}
+				return fmt.Errorf("%w: opencode reasoning effort conflicts with the variant already in model %q; leave Effort empty", ErrUnsupportedFeature, model)
+			}
 			return fmt.Errorf("%w: %s not supported by %s", ErrUnsupportedFeature, feature, formatTarget(provider, flavor))
 		}
 	}
