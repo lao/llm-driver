@@ -699,3 +699,35 @@ func TestStreamCloseLeavesNoGoroutines(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// Finish before the process exited is incomplete on every CLI backend, not
+// only opencode.
+func TestCLIStreamFinishBeforeExitIsIncomplete(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		config core.Config
+		lines  []string
+	}{
+		{"claude", core.Config{Provider: core.ProviderClaude, Flavor: core.FlavorCLI, Model: "m"}, claudeStreamJSONLines()},
+		{"codex", core.Config{Provider: core.ProviderOpenAI, Flavor: core.FlavorCLI, Model: "m"}, codexStreamCompletedOnlyLines()},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			runner := &fakeStreamingRunner{lines: test.lines}
+			stream, err := newCLIStreamClient(test.config, runner.run).GenerateStream(context.Background(), core.Request{MaxTokens: 32, Messages: []core.Message{core.User("q")}})
+			if err != nil {
+				t.Fatalf("GenerateStream(): %v", err)
+			}
+			defer stream.Close()
+			_, err = stream.source.Finish()
+			var contextual *core.Error
+			if !errors.As(err, &contextual) || contextual.Code != "incomplete_stream" {
+				t.Fatalf("Finish() error = %v, want incomplete_stream", err)
+			}
+		})
+	}
+}
