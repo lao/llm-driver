@@ -166,12 +166,29 @@ func TestCommandHelperProcess(t *testing.T) {
 	}
 }
 
-func TestClipMessageStripsANSIColor(t *testing.T) {
+func TestClipMessageStripsTerminalEscapes(t *testing.T) {
 	t.Parallel()
 
-	got := clipMessage("\x1b[93m\x1b[1m! \x1b[0mpermission requested\n")
-	if got != "! permission requested" {
-		t.Fatalf("clipMessage() = %q, want %q", got, "! permission requested")
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "SGR color", in: "\x1b[93m\x1b[1m! \x1b[0mpermission requested\n", want: "! permission requested"},
+		{name: "private CSI", in: "before\x1b[?25lafter", want: "beforeafter"},
+		{name: "OSC 52 BEL", in: "before\x1b]52;c;SGVscG8=\x07after", want: "beforeafter"},
+		{name: "OSC 0 ST", in: "before\x1b]0;spoofed\x1b\\after", want: "beforeafter"},
+		{name: "DCS", in: "before\x1bP1;2|payload\x1b\\after", want: "beforeafter"},
+		{name: "single ESC", in: "before\x1b(Bafter", want: "beforeafter"},
+		{name: "C0 and C1 controls", in: "a\x01b\x07c\x9bd\te\nf", want: "abcd\te\nf"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := clipMessage(test.in); got != test.want {
+				t.Fatalf("clipMessage(%q) = %q, want %q", test.in, got, test.want)
+			}
+		})
 	}
 }
 

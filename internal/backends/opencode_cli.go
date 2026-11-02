@@ -431,5 +431,6 @@ func openCodeFailureError(event openCodeEvent, operation string) *core.Error {
 	if code == "" {
 		code = "error"
 	}
-	return openCodeResultError(operation, code, message)
+	// The message and code are provider/CLI-controlled and reach caller logs.
+	return openCodeResultError(operation, sanitizeTerminal(code), clipMessage(message))
 }

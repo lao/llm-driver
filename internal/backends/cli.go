@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -32,14 +31,11 @@ var errCLIOutputTooLarge = errors.New("llmdriver: CLI output exceeds limit")
 // model-sized result or a large stderr dump does not bloat a single log line.
 const maxErrorMessageBytes = 500
 
-// ansiEscape matches the SGR (color) sequences a CLI writes when it colors its
-// diagnostic output, even when stderr is not a terminal.
-var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
-
-// clipMessage strips terminal color codes, trims surrounding whitespace, and
-// caps a CLI-derived message on a UTF-8 rune boundary.
+// clipMessage strips terminal escape sequences and control characters, trims
+// surrounding whitespace, and caps a CLI-derived message on a UTF-8 rune
+// boundary.
 func clipMessage(s string) string {
-	s = ansiEscape.ReplaceAllString(s, "")
+	s = sanitizeTerminal(s)
 	s = strings.TrimSpace(s)
 	if len(s) <= maxErrorMessageBytes {
 		return s
@@ -49,6 +45,67 @@ func clipMessage(s string) string {
 		end--
 	}
 	return s[:end]
+}
+
+// sanitizeTerminal removes ECMA-48 escape sequences and control characters from
+// CLI/provider diagnostics before they reach a log line or terminal. It covers
+// CSI (including private parameter bytes), OSC/DCS/SOS/PM/APC through their
+// BEL/ST terminator, other ESC sequences, and C0/C1 controls except tab and
+// newline.
+func sanitizeTerminal(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] != 0x1b {
+			r, size := utf8.DecodeRuneInString(s[i:])
+			if r == utf8.RuneError && size == 1 {
+				i++
+				continue
+			}
+			if r == '\t' || r == '\n' || (r >= 0x20 && r != 0x7f && !(r >= 0x80 && r <= 0x9f)) {
+				b.WriteString(s[i : i+size])
+			}
+			i += size
+			continue
+		}
+		i++ // ESC
+		if i >= len(s) {
+			break
+		}
+		switch s[i] {
+		case '[': // CSI: parameter bytes, intermediate bytes, final byte.
+			i++
+			for i < len(s) && s[i] >= 0x30 && s[i] <= 0x3f {
+				i++
+			}
+			for i < len(s) && s[i] >= 0x20 && s[i] <= 0x2f {
+				i++
+			}
+			if i < len(s) && s[i] >= 0x40 && s[i] <= 0x7e {
+				i++
+			}
+		case ']', 'P', 'X', '^', '_': // OSC/DCS/SOS/PM/APC: through BEL or ST.
+			i++
+			for i < len(s) {
+				if s[i] == 0x07 {
+					i++
+					break
+				}
+				if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
+					i += 2
+					break
+				}
+				i++
+			}
+		default: // ESC + optional intermediates + final byte.
+			for i < len(s) && s[i] >= 0x20 && s[i] <= 0x2f {
+				i++
+			}
+			if i < len(s) && s[i] >= 0x30 && s[i] <= 0x7e {
+				i++
+			}
+		}
+	}
+	return b.String()
 }
 
 type boundedBuffer struct {
@@ -397,7 +454,7 @@ func attachCLIStderr(err error, stderr []byte) error {
 		if contextual.Message == "" {
 			contextual.Message = detail
 		} else {
-			contextual.Message += ": " + detail
+			contextual.Message = clipMessage(contextual.Message + ": " + detail)
 		}
 	}
 	return err

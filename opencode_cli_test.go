@@ -128,6 +128,39 @@ func TestOpenCodeCLIEffortRequiresModel(t *testing.T) {
 	}
 }
 
+// A provider/CLI-controlled error message is sanitized and capped before it
+// reaches caller logs, just like stderr.
+func TestOpenCodeCLIErrorEventIsSanitized(t *testing.T) {
+	t.Parallel()
+
+	message := strings.Repeat("x", 1000) + `\u001b]52;c;SGVscG8=\u0007`
+	runner := &fakeCommandRunner{stdout: []byte(
+		`{"type":"error","sessionID":"ses_1","error":{"type":"provider.no-route","data":{"message":"` + message + `"}}}` + "\n",
+	)}
+	client, err := newClient(Config{
+		Provider: ProviderOpenCode,
+		Flavor:   FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}})
+	if err == nil {
+		t.Fatal("Generate() succeeded, want an error")
+	}
+	var target *Error
+	if !errors.As(err, &target) {
+		t.Fatalf("Generate() error = %T %v, want *Error", err, err)
+	}
+	if len(target.Message) > 500 {
+		t.Fatalf("message length = %d, want <= 500", len(target.Message))
+	}
+	if strings.ContainsAny(target.Message, "\x1b\x07") {
+		t.Fatalf("message carries an escape sequence: %q", target.Message)
+	}
+}
+
 func TestOpenCodeCLISuccessConcatenatesTextPartsAndUsage(t *testing.T) {
 	t.Parallel()
 
