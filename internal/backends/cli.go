@@ -42,6 +42,9 @@ func clipMessage(s string) string {
 // clipMessageTo is clipMessage with an explicit byte budget, used when a
 // diagnostic is appended to existing text.
 func clipMessageTo(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
 	s = sanitizeTerminal(s)
 	s = strings.TrimSpace(s)
 	if len(s) <= limit {

@@ -94,7 +94,7 @@ const (
 	// CodeMissingFinalMessage identifies a completed Codex CLI turn that emitted
 	// no completed agent message.
 	CodeMissingFinalMessage = core.CodeMissingFinalMessage
-	// CodeToolCalls identifies a CLI turn that ended on a tool call without
+	// CodeToolCalls identifies a CLI turn that ended to call a tool without
 	// producing response text.
 	CodeToolCalls = core.CodeToolCalls
 
