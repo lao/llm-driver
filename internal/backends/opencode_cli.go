@@ -63,6 +63,9 @@ func newOpenCodeCLIBackend(config cliBackendConfig) *openCodeCLIBackend {
 // real binary so a renamed or removed flag surfaces instead of failing only at
 // runtime.
 func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
+	if err := b.validateEffort(request); err != nil {
+		return nil, err
+	}
 	stdout, stderr, err := executeCLI(
 		ctx,
 		core.ProviderOpenCode,
@@ -91,11 +94,27 @@ func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request)
 	return response, nil
 }
 
+// validateEffort rejects an effort 2.x cannot express: the variant is part of
+// the model id, so there is no default-model form and no way to override a
+// variant already in the model. Rejecting matches the library's contract for
+// unsupported request/target combinations; callers that want to degrade
+// instead must clear Effort before the call.
+func (b *openCodeCLIBackend) validateEffort(request core.Request) error {
+	if request.Effort == "" {
+		return nil
+	}
+	if b.model == "" {
+		return fmt.Errorf("%w: opencode effort %q requires Config.Model (2.x encodes it as model#variant)", core.ErrUnsupportedFeature, request.Effort)
+	}
+	if strings.Contains(b.model, "#") {
+		return fmt.Errorf("%w: opencode effort %q conflicts with the variant already in model %q; put the desired variant in the model and leave Effort empty", core.ErrUnsupportedFeature, request.Effort, b.model)
+	}
+	return nil
+}
+
 // openCodeModel returns the model id opencode 2.x actually runs: the variant is
-// a suffix of the model id. A model already carrying a variant is left
-// untouched, and an effort with no named model is dropped because 2.x has no
-// way to attach it to the default model. Callers warn about that at
-// configuration time.
+// a suffix of the model id. validateEffort has already rejected the two cases
+// that cannot be expressed.
 func openCodeModel(model string, effort core.Effort) string {
 	if effort != "" && model != "" && !strings.Contains(model, "#") {
 		return model + "#" + string(effort)
@@ -116,6 +135,9 @@ func (b *openCodeCLIBackend) commandArgs(request core.Request) []string {
 // GenerateStream reuses the batch invocation and parses the same JSON events as
 // they arrive instead of after the process exits.
 func (b *openCodeCLIBackend) GenerateStream(ctx context.Context, request core.Request) (core.ChunkStream, error) {
+	if err := b.validateEffort(request); err != nil {
+		return nil, err
+	}
 	process, err := startCLIStream(
 		ctx,
 		core.ProviderOpenCode,
@@ -189,11 +211,21 @@ func (p *openCodeParser) event(line []byte) (string, error) {
 	}
 	switch event.Type {
 	case "text":
+		if p.finished {
+			// A new step answered after the previous step's finish. That
+			// reason described the prior step (a tool call, say), not the
+			// final text, so it must not become the response's reason.
+			p.finished = false
+			p.reason = ""
+		}
 		return p.textDelta(event)
 	case "step_finish":
 		p.finished = true
 		p.reason = event.Part.Reason
-		p.result.Usage = openCodeUsage(event)
+		// Each step_finish reports that step's usage. Sum across steps so a
+		// tool-call-then-text turn keeps the tool step's spend; a final text
+		// step without a step_finish contributes nothing (2.x reports none).
+		p.result.Usage = addOpenCodeUsage(p.result.Usage, openCodeUsage(event))
 	case "error":
 		return "", openCodeFailureError(event, p.operation)
 	}
@@ -254,6 +286,10 @@ func (p *openCodeParser) response() (*core.Response, error) {
 // agent ended a step to call a tool rather than answer in text.
 const openCodeReasonToolCalls = "tool-calls"
 
+// openCodeReasonContentFilter is the AI SDK finish reason opencode reports when
+// the provider filtered the response.
+const openCodeReasonContentFilter = "content-filter"
+
 // openCodeReasonLength is the step_finish reason opencode reports when the
 // provider stopped on its output-token cap. A turn that hits it mid-answer can
 // deliver truncated text or, when the cap is reached before the first text
@@ -272,6 +308,8 @@ func openCodeCompletionReason(reason string) core.CompletionReason {
 		return core.CompletionReasonToolUse
 	case openCodeReasonLength:
 		return core.CompletionReasonMaxTokens
+	case openCodeReasonContentFilter:
+		return core.CompletionReasonContentFilter
 	default:
 		return ""
 	}
@@ -282,20 +320,7 @@ func openCodeCompletionReason(reason string) core.CompletionReason {
 // auto-rejected a tool permission, leaving the explanation on stderr; without
 // this the error would carry no reason for the missing text.
 func openCodeStderrError(err error, stderr []byte) error {
-	detail := clipMessage(string(stderr))
-	if detail == "" {
-		return err
-	}
-	var target *core.Error
-	if !errors.As(err, &target) {
-		return err
-	}
-	if target.Message == "" {
-		target.Message = detail
-	} else {
-		target.Message += ": " + detail
-	}
-	return err
+	return attachCLIStderr(err, stderr)
 }
 
 func openCodeUsage(event openCodeEvent) core.Usage {
@@ -305,6 +330,16 @@ func openCodeUsage(event openCodeEvent) core.Usage {
 		CachedInputTokens:        event.Part.Tokens.Cache.Read,
 		CacheCreationInputTokens: event.Part.Tokens.Cache.Write,
 		ReasoningTokens:          event.Part.Tokens.Reasoning,
+	}
+}
+
+func addOpenCodeUsage(a, b core.Usage) core.Usage {
+	return core.Usage{
+		InputTokens:              a.InputTokens + b.InputTokens,
+		OutputTokens:             a.OutputTokens + b.OutputTokens,
+		CachedInputTokens:        a.CachedInputTokens + b.CachedInputTokens,
+		CacheCreationInputTokens: a.CacheCreationInputTokens + b.CacheCreationInputTokens,
+		ReasoningTokens:          a.ReasoningTokens + b.ReasoningTokens,
 	}
 }
 

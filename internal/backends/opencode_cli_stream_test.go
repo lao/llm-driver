@@ -166,6 +166,69 @@ func TestOpenCodeCLIStreamTextOnlyCompletes(t *testing.T) {
 	}
 }
 
+// A clean exit can still end on a result error (a headless run that
+// auto-rejected a tool); the stderr explanation must reach the error.
+func TestOpenCodeCLIStreamCleanExitCarriesStderr(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeStreamingRunner{
+		lines: []string{
+			`{"type":"tool_use","sessionID":"ses_1","part":{"type":"tool","tool":"read"}}`,
+			`{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_1","type":"step-finish","reason":"tool-calls"}}`,
+		},
+		stderr: []byte("permission denied\n"),
+	}
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderOpenCode,
+		Flavor:   core.FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	stream, err := client.GenerateStream(context.Background(), core.Request{MaxTokens: 32, Messages: []core.Message{core.User("q")}})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+	_, err, _ = collectStream(t, stream)
+	var contextual *core.Error
+	if !errors.As(err, &contextual) {
+		t.Fatalf("stream error = %T %v, want *core.Error", err, err)
+	}
+	if contextual.Code != core.CodeToolCalls {
+		t.Fatalf("code = %q, want %q", contextual.Code, core.CodeToolCalls)
+	}
+	if !strings.Contains(contextual.Message, "permission denied") {
+		t.Fatalf("message = %q, want the stderr diagnostic", contextual.Message)
+	}
+}
+
+// Finish is valid only after the stream is drained. A caller that finalizes
+// early must not get partial text presented as a completed answer.
+func TestOpenCodeCLIStreamFinishBeforeExit(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeStreamingRunner{lines: []string{
+		`{"type":"text","sessionID":"ses_1","part":{"id":"prt_1","type":"text","text":"partial"}}`,
+	}}
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderOpenCode,
+		Flavor:   core.FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	stream, err := client.GenerateStream(context.Background(), core.Request{MaxTokens: 32, Messages: []core.Message{core.User("q")}})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+	_, err = stream.source.Finish()
+	var contextual *core.Error
+	if !errors.As(err, &contextual) {
+		t.Fatalf("Finish() error = %T %v, want *core.Error", err, err)
+	}
+	if contextual.Code != "incomplete_stream" {
+		t.Fatalf("code = %q, want incomplete_stream", contextual.Code)
+	}
+}
+
 func TestOpenCodeCompletionReason(t *testing.T) {
 	t.Parallel()
 
@@ -176,6 +239,7 @@ func TestOpenCodeCompletionReason(t *testing.T) {
 		{reason: "stop", want: core.CompletionReasonStop},
 		{reason: "tool-calls", want: core.CompletionReasonToolUse},
 		{reason: "length", want: core.CompletionReasonMaxTokens},
+		{reason: "content-filter", want: core.CompletionReasonContentFilter},
 		{reason: "", want: ""},
 		{reason: "future-reason", want: ""},
 	}
@@ -270,6 +334,11 @@ func TestOpenCodeCLIStreamErrors(t *testing.T) {
 				`{"type":"error","sessionID":"ses_1","error":{"name":"ProviderError","data":{"message":"model unavailable"}}}`,
 			}},
 			wantCode: "ProviderError",
+		},
+		{
+			name:     "missing step finish and text",
+			runner:   &fakeStreamingRunner{lines: []string{`{"type":"step_start","sessionID":"ses_1"}`}},
+			wantCode: "missing_step_finish",
 		},
 		{
 			name:       "missing text",

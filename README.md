@@ -297,8 +297,22 @@ rejected there; the other targets accept the full set. Each target maps the leve
 natively: `claude/api` via `output_config.effort`, `openai/api` via
 `reasoning.effort`, `claude/cli` via `--effort`, `codex/cli` via
 `-c model_reasoning_effort`, and `opencode/cli` as the `#variant` suffix of the
-model id (`opencode run --model provider/model#variant`). opencode 1.x is not
-supported.
+model id (`opencode run --model provider/model#variant`). The opencode CLI
+backend targets 2.x; the driver still recognizes the 1.x `name` error field for
+compatibility.
+
+opencode 2.x has no way to attach an effort to the CLI's default model, so an
+effort with an empty `Config.Model` is rejected with `ErrUnsupportedFeature` —
+set a model to use it. If `Config.Model` already contains a `#variant`,
+`Request.Effort` is rejected for the same reason; put the desired variant in the
+model and leave `Effort` empty. When an effort is applied, `Response.Model` is
+the effective id including the `#variant` suffix; `Config.Model` and the ids
+returned by `ListModels` remain the base `provider/model` ids.
+
+**Breaking for opencode 1.x callers:** an effort with an empty `Config.Model`
+was sent as `--variant`; 2.x has no equivalent, so it is now rejected with
+`ErrUnsupportedFeature`. Set a model and put the desired `#variant` in it to keep
+reasoning control.
 
 The example accepts a level via `--effort`:
 
@@ -377,9 +391,11 @@ the hosted APIs:
   so a headless run cannot approve agent tool actions. Codex runs with a
   read-only sandbox; opencode runs non-interactively without `--auto`. Agent
   CLI behavior can still differ from a hosted model endpoint. An opencode turn
-  the model ends on a tool call — commonly a permission auto-reject — fails with
-  code `tool_calls` (carrying the CLI's stderr diagnostic) instead of surfacing
-  as a generic empty response. A turn the provider stopped on its output cap
+  that ends on a tool call **without returning text** — commonly a permission
+  auto-reject — fails with code `tool_calls` (carrying the CLI's stderr
+  diagnostic) instead of surfacing as a generic empty response. A turn that
+  emits text and then ends on a tool call is a normal response with
+  `CompletionReasonToolUse`. A turn the provider stopped on its output cap
   reports `CompletionReasonMaxTokens` on the response, and carries
   `Reason: "length"` on the error when the cap was reached before any text.
   opencode 2.x omits the terminal `step_finish` for a plain text answer, so the

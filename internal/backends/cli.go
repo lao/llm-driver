@@ -319,6 +319,13 @@ type cliChunkStream struct {
 	scanner  *bufio.Scanner
 	parser   cliEventParser
 	failure  error
+	// stderr is cached by exit() so Finish can attach a clean-exit diagnostic
+	// without waiting on the process a second time.
+	stderr []byte
+	// exited records that exit() observed the process end. Finish only accepts
+	// a text-only turn when this is true; that is the half of "completed process
+	// plus text" the parser cannot see.
+	exited bool
 }
 
 func newCLIChunkStream(provider core.Provider, process cliProcess, parser cliEventParser) *cliChunkStream {
@@ -363,7 +370,37 @@ func (s *cliChunkStream) Recv() (core.Chunk, error) {
 }
 
 func (s *cliChunkStream) Finish() (*core.Response, error) {
-	return s.parser.response()
+	if s.failure != nil {
+		return nil, s.failure
+	}
+	if !s.exited {
+		failure := s.streamError(nil, "stream finished before the CLI exited")
+		failure.Code = "incomplete_stream"
+		return nil, failure
+	}
+	response, err := s.parser.response()
+	return response, attachCLIStderr(err, s.stderr)
+}
+
+// attachCLIStderr adds a non-empty stderr diagnostic to a CLI result error. A
+// headless CLI can exit 0 after a result error (an auto-rejected tool, say),
+// and the explanation is only on stderr.
+func attachCLIStderr(err error, stderr []byte) error {
+	if err == nil {
+		return nil
+	}
+	var contextual *core.Error
+	if !errors.As(err, &contextual) {
+		return err
+	}
+	if detail := clipMessage(string(stderr)); detail != "" {
+		if contextual.Message == "" {
+			contextual.Message = detail
+		} else {
+			contextual.Message += ": " + detail
+		}
+	}
+	return err
 }
 
 func (s *cliChunkStream) Close() error {
@@ -414,6 +451,8 @@ func (s *cliChunkStream) fail(err error) error {
 
 func (s *cliChunkStream) exit() error {
 	exitCode, stderr, err := s.process.wait()
+	s.stderr = stderr
+	s.exited = true
 	if err != nil {
 		return s.streamError(err, clipMessage(string(stderr)))
 	}

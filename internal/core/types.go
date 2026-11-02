@@ -172,7 +172,9 @@ type Request struct {
 	OutputSchema *OutputSchema `json:"output_schema,omitempty"`
 	// Effort optionally selects a reasoning-effort level. The zero value ""
 	// leaves it unset. A value the target does not support is rejected with
-	// ErrUnsupportedFeature before invocation.
+	// ErrUnsupportedFeature before invocation. opencode 2.x cannot attach an
+	// effort to an empty Model or override a variant already in Model; those
+	// combinations are rejected, so put the desired #variant in Model.
 	Effort Effort `json:"effort,omitempty"`
 	// Temperature optionally sets the sampling temperature. Nil leaves it unset.
 	// It is passed through to API flavors (validated only as non-negative and
@@ -232,7 +234,10 @@ const (
 type Response struct {
 	// ID is the provider response or CLI session/thread identifier, when reported.
 	ID string `json:"id,omitempty"`
-	// Model is the configured or provider-reported model name.
+	// Model is the model that produced the response: the configured id, or the
+	// provider-reported name when it differs. opencode 2.x includes the effective
+	// #variant suffix here; Config.Model and ListModels ids are base provider/model
+	// ids.
 	Model string `json:"model"`
 	// Text is the normalized response text.
 	Text string `json:"text"`

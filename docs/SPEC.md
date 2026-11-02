@@ -17,7 +17,13 @@ JSON-schema flag, its structured output states the schema in the prompt and
 validates the returned document, failing `invalid_structured_output` on a
 non-JSON answer. `ListModels` runs `opencode models` to discover the
 `provider/model` ids the installed opencode can use, and `Config.Model` accepts
-any such id.
+any such id. opencode 2.x encodes reasoning effort as the model id's `#variant`
+suffix (`Response.Model` carries the effective id); an effort with an empty
+model or a model that already names a variant is rejected with
+`ErrUnsupportedFeature`, because 2.x has no default-model form and cannot
+override an inline variant. A plain text turn may omit the terminal
+`step_finish`; a completed process plus text is the finish signal, and a
+tool-only turn reports `tool_calls`.
 
 Scope decision (approved): **generation parity only.** Platform APIs that a
 CLI can never serve (embeddings, batches, files CRUD, audio, images

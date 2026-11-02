@@ -61,29 +61,6 @@ func TestOpenCodeCLICommand(t *testing.T) {
 			wantArgs:   []string{"run", "--format", "json", "--model", "anthropic/claude-sonnet-4-5#high"},
 			wantPrompt: "q",
 		},
-		{
-			name: "model that already names a variant is left alone",
-			config: Config{
-				Provider: ProviderOpenCode,
-				Flavor:   FlavorCLI,
-				Model:    "anthropic/claude-sonnet-4-5#low",
-			},
-			request:    Request{MaxTokens: 32, Messages: []Message{User("q")}, Effort: EffortHigh},
-			wantPath:   "opencode",
-			wantArgs:   []string{"run", "--format", "json", "--model", "anthropic/claude-sonnet-4-5#low"},
-			wantPrompt: "q",
-		},
-		{
-			name: "effort without a named model is dropped, not sent as --variant",
-			config: Config{
-				Provider: ProviderOpenCode,
-				Flavor:   FlavorCLI,
-			},
-			request:    Request{MaxTokens: 32, Messages: []Message{User("q")}, Effort: EffortHigh},
-			wantPath:   "opencode",
-			wantArgs:   []string{"run", "--format", "json"},
-			wantPrompt: "q",
-		},
 	}
 
 	for _, test := range tests {
@@ -100,6 +77,53 @@ func TestOpenCodeCLICommand(t *testing.T) {
 				t.Fatalf("Generate(): %v", err)
 			}
 			runner.assertCall(t, test.wantPath, test.wantArgs, test.wantPrompt)
+		})
+	}
+}
+
+// opencode 2.x can only express an effort through a named model's #variant.
+// Both shapes that cannot work are rejected, matching the library's
+// unsupported-feature contract instead of silently dropping the level.
+func TestOpenCodeCLIEffortRequiresModel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		model string
+		want  string
+	}{
+		{name: "empty model", model: "", want: "requires Config.Model"},
+		{name: "inline variant", model: "p/m#low", want: "conflicts with the variant"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			runner := &fakeCommandRunner{stdout: []byte(openCodeSuccessOutput("ok"))}
+			client, err := newClient(Config{
+				Provider: ProviderOpenCode,
+				Flavor:   FlavorCLI,
+				Model:    test.model,
+			}, runner.run)
+			if err != nil {
+				t.Fatalf("New(): %v", err)
+			}
+			_, err = client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}, Effort: EffortHigh})
+			if !errors.Is(err, ErrUnsupportedFeature) {
+				t.Fatalf("Generate() error = %v, want ErrUnsupportedFeature", err)
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %q, want %q", err, test.want)
+			}
+			if runner.calls != 0 {
+				t.Fatalf("the CLI was spawned %d times for an unsupported effort", runner.calls)
+			}
+			stream, err := client.GenerateStream(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}, Effort: EffortHigh})
+			if !errors.Is(err, ErrUnsupportedFeature) {
+				t.Fatalf("GenerateStream() error = %v, want ErrUnsupportedFeature", err)
+			}
+			if stream != nil {
+				t.Fatal("GenerateStream() returned a stream for an unsupported effort")
+			}
 		})
 	}
 }
@@ -152,6 +176,34 @@ func TestOpenCodeCLISuccessConcatenatesTextPartsAndUsage(t *testing.T) {
 	}
 }
 
+// A multi-step turn reports one step_finish per step; the response usage is the
+// sum, not just the last step's count.
+func TestOpenCodeCLIUsageSumsSteps(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{stdout: []byte(
+		`{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_1","type":"step-finish","reason":"tool-calls","tokens":{"input":10,"output":2,"reasoning":1,"cache":{"read":3,"write":4}}}}` + "\n" +
+			`{"type":"text","sessionID":"ses_1","part":{"id":"prt_2","type":"text","text":"answer"}}` + "\n" +
+			`{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_3","type":"step-finish","reason":"stop","tokens":{"input":20,"output":5,"reasoning":2,"cache":{"read":6,"write":7}}}}` + "\n",
+	)}
+	client, err := newClient(Config{
+		Provider: ProviderOpenCode,
+		Flavor:   FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	response, err := client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	want := Usage{InputTokens: 30, OutputTokens: 7, CachedInputTokens: 9, CacheCreationInputTokens: 11, ReasoningTokens: 3}
+	if response.Usage != want {
+		t.Fatalf("Usage = %+v, want %+v", response.Usage, want)
+	}
+}
+
 // TestOpenCodeCLITextOnlyRunWithoutStepFinishCompletes covers the opencode 2.x
 // stream: a plain text answer ends after the text part, with no terminal
 // step_finish. A completed process with text is the finish signal; usage and
@@ -184,6 +236,39 @@ func TestOpenCodeCLITextOnlyRunWithoutStepFinishCompletes(t *testing.T) {
 	}
 	if response.Usage != (Usage{}) {
 		t.Fatalf("Usage = %+v, want zero when opencode omits step_finish", response.Usage)
+	}
+}
+
+// A tool step's finish reason belongs to that step, not to a later text answer.
+// opencode 2.x omits the terminal step_finish, so a tool-call-then-text turn
+// must not report CompletionReasonToolUse for a complete answer.
+func TestOpenCodeCLITextAfterToolStepDoesNotInheritReason(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{stdout: []byte(
+		`{"type":"step_start","sessionID":"ses_1","part":{"id":"prt_1","type":"step-start"}}` + "\n" +
+			`{"type":"tool_use","sessionID":"ses_1","part":{"id":"prt_2","type":"tool","tool":"read"}}` + "\n" +
+			`{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_3","type":"step-finish","reason":"tool-calls"}}` + "\n" +
+			`{"type":"step_start","sessionID":"ses_1","part":{"id":"prt_4","type":"step-start"}}` + "\n" +
+			`{"type":"text","sessionID":"ses_1","part":{"id":"prt_5","type":"text","text":"final answer"}}` + "\n",
+	)}
+	client, err := newClient(Config{
+		Provider: ProviderOpenCode,
+		Flavor:   FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	response, err := client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if response.Text != "final answer" {
+		t.Fatalf("Text = %q, want the final answer", response.Text)
+	}
+	if response.CompletionReason != "" {
+		t.Fatalf("CompletionReason = %q, want empty; the tool step's reason is stale", response.CompletionReason)
 	}
 }
 
@@ -396,6 +481,11 @@ func TestOpenCodeCLIErrors(t *testing.T) {
 			)},
 			wantCode:    "provider.no-route",
 			wantMessage: "Variant unavailable for p/m: bogus",
+		},
+		{
+			name:     "missing step finish and text",
+			runner:   &fakeCommandRunner{stdout: []byte(`{"type":"step_start","sessionID":"ses_1"}` + "\n")},
+			wantCode: "missing_step_finish",
 		},
 		{
 			name:       "missing text",
