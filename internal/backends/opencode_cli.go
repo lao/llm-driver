@@ -473,13 +473,13 @@ func openCodeFailureError(event openCodeEvent, operation string) *core.Error {
 	if message == "" {
 		message = "opencode run failed"
 	}
-	code := event.Error.Type
+	// The message and code are provider/CLI-controlled and reach caller logs.
+	code := clipMessage(event.Error.Type)
 	if code == "" {
-		code = event.Error.Name
+		code = clipMessage(event.Error.Name)
 	}
 	if code == "" {
 		code = "error"
 	}
-	// The message and code are provider/CLI-controlled and reach caller logs.
-	return openCodeResultError(operation, clipMessage(code), message)
+	return openCodeResultError(operation, code, message)
 }

@@ -510,3 +510,14 @@ func TestOpenCodeParserRedeliveredToolFinishAfterTextKeepsAnswer(t *testing.T) {
 		t.Fatalf("response = %+v, err = %v", response, err)
 	}
 }
+
+func TestOpenCodeFailureErrorCodeFallsBackWhenTypeSanitizesEmpty(t *testing.T) {
+	t.Parallel()
+
+	parser := newOpenCodeParser("m", nil, "generate")
+	_, err := parser.event([]byte(`{"type":"error","error":{"type":"\u001b[2J\u0007","name":"X","message":"boom"}}`))
+	var coreErr *core.Error
+	if !errors.As(err, &coreErr) || coreErr.Code != "X" {
+		t.Fatalf("want code fallback to name, got %v", err)
+	}
+}

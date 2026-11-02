@@ -273,7 +273,7 @@ func claudeCLIResponse(result claudeCLIResult, model string, operation string) (
 			Operation: operation,
 			Status:    result.APIErrorStatus,
 			Reason:    clipMessage(result.TerminalReason),
-			Code:      clipMessage(claudeCLIErrorCode(result)),
+			Code:      claudeCLIErrorCode(result),
 			Message:   clipMessage(message),
 		}
 	}
@@ -311,14 +311,15 @@ func claudeCompletionReason(stopReason string) core.CompletionReason {
 }
 
 func claudeCLIErrorCode(result claudeCLIResult) string {
-	if result.Subtype != "" && result.Subtype != "success" {
-		return result.Subtype
+	// Sanitize before the empty checks so a control-only value falls through.
+	if subtype := clipMessage(result.Subtype); subtype != "" && subtype != "success" {
+		return subtype
 	}
 	if result.IsError {
 		return "error"
 	}
-	if result.Type != "" && result.Type != "result" {
-		return result.Type
+	if typ := clipMessage(result.Type); typ != "" && typ != "result" {
+		return typ
 	}
 	return "unsuccessful_result"
 }
