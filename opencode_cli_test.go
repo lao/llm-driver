@@ -373,6 +373,33 @@ func TestOpenCodeCLIDuplicateTextAfterFinishKeepsReason(t *testing.T) {
 	}
 }
 
+// A nonzero exit with an error event keeps the event's message and appends the
+// CLI's stderr, matching the Claude/Codex diagnostic paths.
+func TestOpenCodeCLINonzeroDiagnosticCarriesStderr(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeCommandRunner{
+		stdout:   []byte(`{"type":"error","sessionID":"ses_1","error":{"name":"ProviderError","data":{"message":"server failed"}}}` + "\n"),
+		stderr:   []byte("permission denied\n"),
+		exitCode: 1,
+	}
+	client, err := newClient(Config{
+		Provider: ProviderOpenCode,
+		Flavor:   FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = client.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}})
+	if err == nil {
+		t.Fatal("Generate() succeeded, want an error")
+	}
+	if !strings.Contains(err.Error(), "server failed") || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("error = %q, want the event message and stderr", err)
+	}
+}
+
 // TestOpenCodeCLIEffortAppearsInResponseModel pins that the effective model is
 // the same string the CLI ran: the variant suffix belongs to the response model
 // too, so callers do not report a bare id for a variant run.

@@ -245,4 +245,14 @@ func TestAttachCLIStderrKeepsTail(t *testing.T) {
 	if !strings.HasSuffix(err.(*core.Error).Message, "permission denied") {
 		t.Fatalf("message = %q, want the stderr tail preserved", err.(*core.Error).Message)
 	}
+
+	full := &core.Error{Message: "prefix"}
+	detail := strings.Repeat("d", maxErrorMessageBytes)
+	err = attachCLIStderr(full, []byte(detail))
+	if strings.HasPrefix(err.(*core.Error).Message, ": ") {
+		t.Fatalf("message = %q, want no leading separator when the diagnostic fills the budget", err.(*core.Error).Message)
+	}
+	if len(err.(*core.Error).Message) > maxErrorMessageBytes {
+		t.Fatalf("message length = %d, want <= %d", len(err.(*core.Error).Message), maxErrorMessageBytes)
+	}
 }

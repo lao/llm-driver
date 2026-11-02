@@ -476,8 +476,10 @@ func attachCLIStderr(err error, stderr []byte) error {
 	// Reserve room for the stderr tail: it is the evidence the caller needs, so
 	// truncating the appended part would defeat the purpose.
 	room := maxErrorMessageBytes - len(detail) - len(separator)
-	if room < 0 {
-		room = 0
+	if room <= 0 {
+		// The diagnostic fills the budget; do not emit a bare separator.
+		contextual.Message = detail
+		return err
 	}
 	contextual.Message = clipMessageTo(contextual.Message, room) + separator + detail
 	return err

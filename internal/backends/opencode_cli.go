@@ -82,7 +82,7 @@ func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request)
 		if errors.As(err, &processError) && processError.Status != 0 {
 			if diagnostic := openCodeDiagnostic(stdout); diagnostic != nil {
 				diagnostic.Status = processError.Status
-				return nil, diagnostic
+				return nil, openCodeStderrError(diagnostic, stderr)
 			}
 		}
 		return nil, err
