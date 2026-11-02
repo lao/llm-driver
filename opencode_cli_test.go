@@ -288,10 +288,20 @@ func TestOpenCodeCLITextOnlyRunWithoutStepFinishCompletes(t *testing.T) {
 		`{"type":"step_start","sessionID":"ses_1","part":{"id":"prt_1","type":"step-start"}}` + "\n" +
 			`{"type":"text","sessionID":"ses_1","part":{"id":"prt_2","type":"text","text":"finished answer"}}` + "\n",
 	)}
+	strict, err := newClient(Config{Provider: ProviderOpenCode, Flavor: FlavorCLI}, runner.run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = strict.Generate(context.Background(), Request{MaxTokens: 32, Messages: []Message{User("q")}})
+	var strictErr *Error
+	if !errors.As(err, &strictErr) || strictErr.Code != "unverified_completion" {
+		t.Fatalf("strict Generate() error = %v, want unverified_completion", err)
+	}
 	client, err := newClient(Config{
-		Provider: ProviderOpenCode,
-		Flavor:   FlavorCLI,
-		Model:    "anthropic/claude-sonnet-4-5",
+		AcceptUnverifiedOpenCode: true,
+		Provider:                 ProviderOpenCode,
+		Flavor:                   FlavorCLI,
+		Model:                    "anthropic/claude-sonnet-4-5",
 	}, runner.run)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
@@ -326,9 +336,10 @@ func TestOpenCodeCLITextAfterToolStepDoesNotInheritReason(t *testing.T) {
 			`{"type":"text","sessionID":"ses_1","part":{"id":"prt_5","type":"text","text":"final answer"}}` + "\n",
 	)}
 	client, err := newClient(Config{
-		Provider: ProviderOpenCode,
-		Flavor:   FlavorCLI,
-		Model:    "anthropic/claude-sonnet-4-5",
+		AcceptUnverifiedOpenCode: true,
+		Provider:                 ProviderOpenCode,
+		Flavor:                   FlavorCLI,
+		Model:                    "anthropic/claude-sonnet-4-5",
 	}, runner.run)
 	if err != nil {
 		t.Fatalf("New(): %v", err)

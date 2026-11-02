@@ -22,15 +22,13 @@ suffix (`Response.Model` carries the effective id); an effort with an empty
 model or a model that already names a variant is rejected with
 `ErrUnsupportedFeature`, because 2.x has no default-model form and cannot
 override an inline variant. A plain text turn may omit the terminal
-`step_finish`; a completed process plus text is the finish signal, and it
-reports `CompletionReasonUnverified` so callers can tell the finish was not
-verified. A tool-only turn fails with a `tool_calls` error, and a step that finishes
-on `error` after partial text fails with a `step_error` error.
+`step_finish`. Unverified completion fails with `unverified_completion` by
+default; setting `Config.AcceptUnverifiedOpenCode` accepts it with
+`CompletionReasonUnverified`, even though truncation cannot be ruled out. A
+text-only turn with no `step_finish` has zero usage. A tool-only turn fails
+with a `tool_calls` error, and a step that finishes on `error` after partial
+text fails with a `step_error` error.
 
-Approved SPEC exception (opencode 2.x): clean-exit text-only responses remain
-successful by default with `CompletionReasonUnverified` and zero usage, even
-though truncation cannot be ruled out. This explicitly exempts that case from
-the fail-loudly/no-truncated-success invariant; it does not certify completeness.
 Security-relevant callers (including automated review/approval consumers) must
 check `CompletionReason` before acting and require `CompletionReasonStop`;
 reject unverified, capped, or otherwise non-stop results and discard streamed

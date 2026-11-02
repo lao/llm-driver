@@ -87,7 +87,7 @@ func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request)
 		}
 		return nil, err
 	}
-	response, err := parseOpenCodeOutput(stdout, openCodeModel(b.model, request.Effort), request.OutputSchema)
+	response, err := parseOpenCodeOutput(stdout, openCodeModel(b.model, request.Effort), request.OutputSchema, b.acceptUnverified)
 	if err != nil {
 		return nil, openCodeStderrError(err, stderr)
 	}
@@ -151,7 +151,7 @@ func (b *openCodeCLIBackend) GenerateStream(ctx context.Context, request core.Re
 	return newCLIChunkStream(
 		core.ProviderOpenCode,
 		process,
-		newOpenCodeParser(openCodeModel(b.model, request.Effort), request.OutputSchema, "generate_stream"),
+		newOpenCodeParserWithPolicy(openCodeModel(b.model, request.Effort), request.OutputSchema, "generate_stream", b.acceptUnverified),
 	), nil
 }
 
@@ -180,9 +180,10 @@ func openCodePrompt(request core.Request) string {
 // per-part emitted map treats an event's text as cumulative for its part id, so
 // a repeated part is never emitted twice and separate parts concatenate.
 type openCodeParser struct {
-	operation string
-	schema    *core.OutputSchema
-	model     string
+	acceptUnverified bool
+	operation        string
+	schema           *core.OutputSchema
+	model            string
 
 	result   core.Response
 	emitted  map[string]int
@@ -193,12 +194,17 @@ type openCodeParser struct {
 }
 
 func newOpenCodeParser(model string, schema *core.OutputSchema, operation string) *openCodeParser {
+	return newOpenCodeParserWithPolicy(model, schema, operation, false)
+}
+
+func newOpenCodeParserWithPolicy(model string, schema *core.OutputSchema, operation string, acceptUnverified bool) *openCodeParser {
 	return &openCodeParser{
-		operation: operation,
-		schema:    schema,
-		model:     model,
-		emitted:   make(map[string]int),
-		counted:   make(map[string]bool),
+		acceptUnverified: acceptUnverified,
+		operation:        operation,
+		schema:           schema,
+		model:            model,
+		emitted:          make(map[string]int),
+		counted:          make(map[string]bool),
 	}
 }
 
@@ -322,6 +328,9 @@ func (p *openCodeParser) response() (*core.Response, error) {
 		// cannot distinguish it from a truncated one.
 		response.CompletionReason = core.CompletionReasonUnverified
 	}
+	if response.CompletionReason == core.CompletionReasonUnverified && !p.acceptUnverified {
+		return nil, openCodeResultError(p.operation, "unverified_completion", "opencode did not verify completion")
+	}
 	if err := setStructuredOutput(&response, p.schema, core.ProviderOpenCode, core.FlavorCLI, p.operation); err != nil {
 		return nil, err
 	}
@@ -394,8 +403,8 @@ func addOpenCodeUsage(a, b core.Usage) core.Usage {
 	}
 }
 
-func parseOpenCodeOutput(output []byte, model string, schema *core.OutputSchema) (*core.Response, error) {
-	parser := newOpenCodeParser(model, schema, "generate")
+func parseOpenCodeOutput(output []byte, model string, schema *core.OutputSchema, acceptUnverified bool) (*core.Response, error) {
+	parser := newOpenCodeParserWithPolicy(model, schema, "generate", acceptUnverified)
 	scanner := bufio.NewScanner(bytes.NewReader(output))
 	scanner.Buffer(make([]byte, 64*1024), maxOpenCodeEventSize)
 	for scanner.Scan() {

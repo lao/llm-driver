@@ -405,16 +405,16 @@ the hosted APIs:
   runs its tools itself and never returns `ToolCalls`. A turn the provider stopped on its output cap
   reports `CompletionReasonMaxTokens` on the response, and carries
   `Reason: "length"` on the error when the cap was reached before any text.
-  opencode 2.x omits the terminal `step_finish` for a plain text answer, so the
-  completed process plus text is the finish signal. A text-only turn reports
-  `CompletionReasonUnverified` — truncation cannot be ruled out — and zero usage;
-  it cannot report `CompletionReasonMaxTokens`. This is the default because 2.x
-  never emits a terminal `step_finish` for a plain text answer, so failing
-  closed would reject every ordinary response. Callers that require a terminal
-  reason must reject an unverified response. Security-relevant consumers must
-  require `CompletionReasonStop` before approval or other actions; consumers
-  accepting text-only answers must validate completeness themselves. Usage and a reason are present only when opencode
-  emits a `step_finish` (for example between tool calls).
+  opencode 2.x omits the terminal `step_finish` for a plain text answer. By
+  default, a turn whose completion cannot be verified fails with code
+  `unverified_completion`, even if the process exits successfully. Set
+  `Config.AcceptUnverifiedOpenCode` to true to accept such answers with
+  `CompletionReasonUnverified`; they may be truncated and cannot report
+  `CompletionReasonMaxTokens`. A text-only answer without any `step_finish`
+  has zero usage. Security-relevant consumers must require
+  `CompletionReasonStop` before approval or other actions; consumers accepting
+  unverified answers must validate completeness themselves. Usage and a reason
+  are present only when opencode emits a `step_finish` (for example between tool calls).
 - System text is passed through Claude's system-prompt flag and Codex's
   per-invocation developer-instructions setting. opencode has no system flag, so
   system text is prefixed to the prompt. Conversation text stays on stdin. System

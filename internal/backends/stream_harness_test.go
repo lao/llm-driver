@@ -31,10 +31,11 @@ type streamClient struct {
 
 func newCLIStreamClient(config core.Config, runner streamingCommandRunner) *streamClient {
 	cliConfig := cliBackendConfig{
-		model:        config.Model,
-		path:         config.CLIPath,
-		args:         config.CLIArgs,
-		streamRunner: runner,
+		acceptUnverified: config.AcceptUnverifiedOpenCode,
+		model:            config.Model,
+		path:             config.CLIPath,
+		args:             config.CLIArgs,
+		streamRunner:     runner,
 	}
 	var target core.Backend
 	switch config.Provider {

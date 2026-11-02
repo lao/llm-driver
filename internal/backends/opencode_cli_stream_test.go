@@ -140,9 +140,10 @@ func TestOpenCodeCLIStreamTextOnlyCompletes(t *testing.T) {
 		`{"type":"text","sessionID":"ses_123","part":{"id":"prt_2","type":"text","text":"finished answer"}}`,
 	}}
 	client := newCLIStreamClient(core.Config{
-		Provider: core.ProviderOpenCode,
-		Flavor:   core.FlavorCLI,
-		Model:    "anthropic/claude-sonnet-4-5",
+		AcceptUnverifiedOpenCode: true,
+		Provider:                 core.ProviderOpenCode,
+		Flavor:                   core.FlavorCLI,
+		Model:                    "anthropic/claude-sonnet-4-5",
 	}, runner.run)
 
 	stream, err := client.GenerateStream(context.Background(), core.Request{
@@ -496,7 +497,7 @@ func TestOpenCodeParserRedeliveredToolFinishAfterTextKeepsAnswer(t *testing.T) {
 	t.Parallel()
 
 	toolFinish := `{"type":"step_finish","part":{"id":"prt_f1","reason":"tool-calls"}}`
-	parser := newOpenCodeParser("m", nil, "generate")
+	parser := newOpenCodeParserWithPolicy("m", nil, "generate", true)
 	for _, line := range []string{
 		`{"type":"text","part":{"id":"prt_t1","text":"checking"}}`, toolFinish,
 		`{"type":"text","part":{"id":"prt_t2","text":" done"}}`, toolFinish,
@@ -554,7 +555,7 @@ func TestOpenCodeParserErrorFinishAfterTextFailsAndUnknownReasonIsUnverified(t *
 	t.Parallel()
 
 	run := func(reason string) (*core.Response, error) {
-		parser := newOpenCodeParser("m", nil, "generate")
+		parser := newOpenCodeParserWithPolicy("m", nil, "generate", true)
 		for _, line := range []string{
 			`{"type":"text","part":{"id":"prt_t","text":"partial"}}`,
 			`{"type":"step_finish","part":{"id":"prt_f","reason":"` + reason + `"}}`,
@@ -612,7 +613,7 @@ func TestOpenCodeCLIStreamMidStreamFailureCarriesStderr(t *testing.T) {
 
 func TestOpenCodeParserNewStepInvalidatesPreviousFinish(t *testing.T) {
 	for _, event := range []string{`{"type":"step_start"}`, `{"type":"tool_use"}`} {
-		p := newOpenCodeParser("model", nil, "generate")
+		p := newOpenCodeParserWithPolicy("model", nil, "generate", true)
 		for _, line := range []string{`{"type":"text","part":{"id":"text","text":"answer"}}`, `{"type":"step_finish","part":{"id":"finish","reason":"stop"}}`, event} {
 			if _, err := p.event([]byte(line)); err != nil {
 				t.Fatal(err)
