@@ -44,8 +44,9 @@
 // fewer, larger chunks than the hosted APIs.
 //
 // opencode fronts many upstream providers, so its model is a "provider/model"
-// id. ListModels runs `opencode models` and returns the ids the installed
-// opencode can actually use.
+// id; opencode 2.x encodes the reasoning variant as a "#variant" suffix.
+// ListModels runs `opencode models` and returns the ids the installed opencode
+// can actually use.
 //
 // Optional generation features beyond the baseline (system, messages,
 // MaxTokens, streaming) are gated per target. Client.Supports reports whether

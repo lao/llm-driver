@@ -20,14 +20,17 @@ type openCodeCLIBackend struct {
 }
 
 // openCodeEvent is one `opencode run --format json` line. Text parts carry the
-// answer; step_finish carries usage; error carries a failed run. Unknown types
-// are ignored.
+// answer; step_finish carries usage and a completion reason when opencode emits
+// one; error carries a failed run. Unknown types are ignored. opencode 2.x
+// omits the terminal step_finish for a plain text answer, so its absence after
+// text is not an error.
 type openCodeEvent struct {
 	Type      string `json:"type"`
 	SessionID string `json:"sessionID"`
 	Part      struct {
 		ID     string `json:"id"`
 		Text   string `json:"text"`
+		Reason string `json:"reason"`
 		Tokens struct {
 			Input     int `json:"input"`
 			Output    int `json:"output"`
@@ -39,6 +42,9 @@ type openCodeEvent struct {
 		} `json:"tokens"`
 	} `json:"part"`
 	Error struct {
+		// Type is the opencode 2.x error code (for example
+		// "provider.no-route"); Name is the 1.x spelling.
+		Type    string `json:"type"`
 		Name    string `json:"name"`
 		Message string `json:"message"`
 		Data    struct {
@@ -57,7 +63,10 @@ func newOpenCodeCLIBackend(config cliBackendConfig) *openCodeCLIBackend {
 // real binary so a renamed or removed flag surfaces instead of failing only at
 // runtime.
 func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request) (*core.Response, error) {
-	stdout, err := executeCLI(
+	if err := b.validateEffort(request, "generate"); err != nil {
+		return nil, err
+	}
+	stdout, stderr, err := executeCLI(
 		ctx,
 		core.ProviderOpenCode,
 		b.path,
@@ -73,23 +82,51 @@ func (b *openCodeCLIBackend) Generate(ctx context.Context, request core.Request)
 		if errors.As(err, &processError) && processError.Status != 0 {
 			if diagnostic := openCodeDiagnostic(stdout); diagnostic != nil {
 				diagnostic.Status = processError.Status
-				return nil, diagnostic
+				return nil, openCodeStderrError(diagnostic, stderr)
 			}
 		}
 		return nil, err
 	}
-	return parseOpenCodeOutput(stdout, b.model, request.OutputSchema)
+	response, err := parseOpenCodeOutput(stdout, openCodeModel(b.model, request.Effort), request.OutputSchema, b.acceptUnverified)
+	if err != nil {
+		return nil, openCodeStderrError(err, stderr)
+	}
+	return response, nil
+}
+
+// validateEffort rejects an effort 2.x cannot express: the variant is part of
+// the model id, so there is no default-model form and no way to override a
+// variant already in the model. Rejecting matches the library's contract for
+// unsupported request/target combinations; callers that want to degrade
+// instead must clear Effort before the call.
+func (b *openCodeCLIBackend) validateEffort(request core.Request, operation string) error {
+	if err := core.ValidateRequestFor(core.ProviderOpenCode, core.FlavorCLI, b.model, request); err != nil {
+		return &core.Error{
+			Provider:  core.ProviderOpenCode,
+			Flavor:    core.FlavorCLI,
+			Operation: operation,
+			Err:       err,
+		}
+	}
+	return nil
+}
+
+// openCodeModel returns the model id opencode 2.x actually runs: the variant is
+// a suffix of the model id. validateEffort has already rejected the two cases
+// that cannot be expressed.
+func openCodeModel(model string, effort core.Effort) string {
+	if effort != "" && model != "" && !strings.Contains(model, "#") {
+		return model + "#" + string(effort)
+	}
+	return model
 }
 
 // commandArgs builds the argv shared by the batch and streaming paths.
 func (b *openCodeCLIBackend) commandArgs(request core.Request) []string {
+	model := openCodeModel(b.model, request.Effort)
 	args := []string{"run", "--format", "json"}
-	if b.model != "" {
-		args = append(args, "--model", b.model)
-	}
-	if request.Effort != "" {
-		// Core validated the value; opencode forwards --variant to the provider.
-		args = append(args, "--variant", string(request.Effort))
+	if model != "" {
+		args = append(args, "--model", model)
 	}
 	return append(args, b.args...)
 }
@@ -97,6 +134,9 @@ func (b *openCodeCLIBackend) commandArgs(request core.Request) []string {
 // GenerateStream reuses the batch invocation and parses the same JSON events as
 // they arrive instead of after the process exits.
 func (b *openCodeCLIBackend) GenerateStream(ctx context.Context, request core.Request) (core.ChunkStream, error) {
+	if err := b.validateEffort(request, "generate_stream"); err != nil {
+		return nil, err
+	}
 	process, err := startCLIStream(
 		ctx,
 		core.ProviderOpenCode,
@@ -111,7 +151,7 @@ func (b *openCodeCLIBackend) GenerateStream(ctx context.Context, request core.Re
 	return newCLIChunkStream(
 		core.ProviderOpenCode,
 		process,
-		newOpenCodeParser(b.model, request.OutputSchema, "generate_stream"),
+		newOpenCodeParserWithPolicy(openCodeModel(b.model, request.Effort), request.OutputSchema, "generate_stream", b.acceptUnverified),
 	), nil
 }
 
@@ -140,22 +180,31 @@ func openCodePrompt(request core.Request) string {
 // per-part emitted map treats an event's text as cumulative for its part id, so
 // a repeated part is never emitted twice and separate parts concatenate.
 type openCodeParser struct {
-	operation string
-	schema    *core.OutputSchema
-	model     string
+	acceptUnverified bool
+	operation        string
+	schema           *core.OutputSchema
+	model            string
 
 	result   core.Response
 	emitted  map[string]int
+	counted  map[string]bool
 	text     strings.Builder
 	finished bool
+	reason   string
 }
 
 func newOpenCodeParser(model string, schema *core.OutputSchema, operation string) *openCodeParser {
+	return newOpenCodeParserWithPolicy(model, schema, operation, false)
+}
+
+func newOpenCodeParserWithPolicy(model string, schema *core.OutputSchema, operation string, acceptUnverified bool) *openCodeParser {
 	return &openCodeParser{
-		operation: operation,
-		schema:    schema,
-		model:     model,
-		emitted:   make(map[string]int),
+		acceptUnverified: acceptUnverified,
+		operation:        operation,
+		schema:           schema,
+		model:            model,
+		emitted:          make(map[string]int),
+		counted:          make(map[string]bool),
 	}
 }
 
@@ -168,11 +217,39 @@ func (p *openCodeParser) event(line []byte) (string, error) {
 		p.result.ID = event.SessionID
 	}
 	switch event.Type {
+	case "step_start", "tool_use":
+		p.finished = false
+		p.reason = ""
 	case "text":
+		if _, seen := p.emitted[event.Part.ID]; p.finished && !seen && event.Part.Text != "" {
+			// A new part (a new step) answered after the previous step's
+			// finish. That reason described the prior step (a tool call, say),
+			// not the final text, so it must not become the response's reason.
+			// A re-delivered or still-growing part is the same step and keeps it.
+			p.finished = false
+			p.reason = ""
+		}
 		return p.textDelta(event)
 	case "step_finish":
+		if id := event.Part.ID; id != "" && p.counted[id] {
+			// A re-delivered finish must not re-arm stale state (a tool-calls
+			// reason after later text) nor double-count usage.
+			return "", nil
+		}
 		p.finished = true
-		p.result.Usage = openCodeUsage(event)
+		// The reason is provider-controlled and reaches core.Error.Reason on
+		// error paths, so sanitize it once here.
+		p.reason = clipMessage(event.Part.Reason)
+		// Each step_finish reports that step's usage. Sum across steps so a
+		// tool-call-then-text turn keeps the tool step's spend; a final text
+		// step without a step_finish contributes nothing (2.x reports none).
+		// opencode may re-deliver a step_finish, so count each part id once. A
+		// finish without an id cannot be deduplicated and is assumed unique (2.x
+		// always sets one).
+		if id := event.Part.ID; id != "" {
+			p.counted[id] = true
+		}
+		p.result.Usage = addOpenCodeUsage(p.result.Usage, openCodeUsage(event))
 	case "error":
 		return "", openCodeFailureError(event, p.operation)
 	}
@@ -198,19 +275,112 @@ func (p *openCodeParser) textDelta(event openCodeEvent) (string, error) {
 }
 
 func (p *openCodeParser) response() (*core.Response, error) {
-	if !p.finished {
-		return nil, openCodeResultError(p.operation, "missing_step_finish", "opencode did not finish a step")
+	// A terminal tool-calls step means the run ended on a tool, not an answer,
+	// even if text came first; opencode never returns the ToolCalls to act on.
+	if p.finished && p.reason == openCodeReasonToolCalls && p.text.Len() > 0 {
+		err := openCodeResultError(p.operation, core.CodeToolCalls, "opencode ended the turn on a tool call after partial text")
+		err.Reason = p.reason
+		return nil, err
+	}
+	// An explicit error finish is a failure signal even when text came first.
+	if p.finished && p.reason == openCodeReasonError && p.text.Len() > 0 {
+		err := openCodeResultError(p.operation, "step_error", "opencode ended the turn on an error after partial text")
+		err.Reason = p.reason
+		return nil, err
 	}
 	if p.text.Len() == 0 {
-		return nil, openCodeResultError(p.operation, "missing_text", "opencode returned no text")
+		if !p.finished {
+			return nil, openCodeResultError(p.operation, "missing_step_finish", "opencode did not finish a step")
+		}
+		// A terminal step_finish whose reason is tool-calls means the agent
+		// spent the turn on a tool instead of answering — commonly because a
+		// headless run auto-rejected the permission. Report that distinctly so
+		// it is not confused with an empty completion.
+		switch p.reason {
+		case openCodeReasonToolCalls:
+			err := openCodeResultError(p.operation, core.CodeToolCalls, "opencode ended the turn on a tool call without returning text")
+			err.Reason = p.reason
+			return nil, err
+		case openCodeReasonLength:
+			err := openCodeResultError(p.operation, "max_tokens", "opencode stopped at the output cap before returning text")
+			err.Reason = p.reason
+			return nil, err
+		case openCodeReasonContentFilter:
+			err := openCodeResultError(p.operation, "content_filter", "opencode was filtered before returning text")
+			err.Reason = p.reason
+			return nil, err
+		}
+		err := openCodeResultError(p.operation, "missing_text", "opencode returned no text")
+		err.Reason = p.reason
+		return nil, err
 	}
+	// opencode 2.x ends a plain text turn without a terminal step_finish. The
+	// completed process plus text is the finish signal in that case; usage and
+	// the completion reason are only known when a step_finish was emitted (for
+	// example between tool calls).
 	response := p.result
 	response.Model = p.model
 	response.Text = p.text.String()
+	response.CompletionReason = openCodeCompletionReason(p.reason)
+	if response.CompletionReason == "" {
+		// No terminal step_finish, or one whose reason is unrecognized (say
+		// "error" or "unknown"): the answer may be complete, but the library
+		// cannot distinguish it from a truncated one.
+		response.CompletionReason = core.CompletionReasonUnverified
+	}
+	if response.CompletionReason == core.CompletionReasonUnverified && !p.acceptUnverified {
+		return nil, openCodeResultError(p.operation, "unverified_completion", "opencode did not verify completion")
+	}
 	if err := setStructuredOutput(&response, p.schema, core.ProviderOpenCode, core.FlavorCLI, p.operation); err != nil {
 		return nil, err
 	}
 	return &response, nil
+}
+
+// openCodeReasonToolCalls is the step_finish reason opencode reports when the
+// agent ended a step to call a tool rather than answer in text.
+const openCodeReasonToolCalls = "tool-calls"
+
+// openCodeReasonError is the AI SDK finish reason for a step that ended on a
+// provider error.
+const openCodeReasonError = "error"
+
+// openCodeReasonContentFilter is the AI SDK finish reason opencode reports when
+// the provider filtered the response.
+const openCodeReasonContentFilter = "content-filter"
+
+// openCodeReasonLength is the step_finish reason opencode reports when the
+// provider stopped on its output-token cap. A turn that hits it mid-answer can
+// deliver truncated text or, when the cap is reached before the first text
+// part, no text at all — the reason is then the only evidence of truncation,
+// which is why it is surfaced on the error as well as the response.
+const openCodeReasonLength = "length"
+
+// openCodeCompletionReason maps a step_finish reason to the neutral enum,
+// following the API adapters: an unrecognized reason degrades to empty rather
+// than misclassifying.
+func openCodeCompletionReason(reason string) core.CompletionReason {
+	switch reason {
+	case "stop":
+		return core.CompletionReasonStop
+	// tool-calls is deliberately unmapped: opencode runs its tools itself and
+	// never populates Response.ToolCalls, so ToolUse would break the caller's
+	// tool loop. The raw reason still reaches errors via core.Error.Reason.
+	case openCodeReasonLength:
+		return core.CompletionReasonMaxTokens
+	case openCodeReasonContentFilter:
+		return core.CompletionReasonContentFilter
+	default:
+		return ""
+	}
+}
+
+// openCodeStderrError attaches a stderr diagnostic to a result error when one is
+// available. opencode exits 0 after a terminal step_finish even when it
+// auto-rejected a tool permission, leaving the explanation on stderr; without
+// this the error would carry no reason for the missing text.
+func openCodeStderrError(err error, stderr []byte) error {
+	return attachCLIStderr(err, stderr)
 }
 
 func openCodeUsage(event openCodeEvent) core.Usage {
@@ -223,8 +393,18 @@ func openCodeUsage(event openCodeEvent) core.Usage {
 	}
 }
 
-func parseOpenCodeOutput(output []byte, model string, schema *core.OutputSchema) (*core.Response, error) {
-	parser := newOpenCodeParser(model, schema, "generate")
+func addOpenCodeUsage(a, b core.Usage) core.Usage {
+	return core.Usage{
+		InputTokens:              a.InputTokens + b.InputTokens,
+		OutputTokens:             a.OutputTokens + b.OutputTokens,
+		CachedInputTokens:        a.CachedInputTokens + b.CachedInputTokens,
+		CacheCreationInputTokens: a.CacheCreationInputTokens + b.CacheCreationInputTokens,
+		ReasoningTokens:          a.ReasoningTokens + b.ReasoningTokens,
+	}
+}
+
+func parseOpenCodeOutput(output []byte, model string, schema *core.OutputSchema, acceptUnverified bool) (*core.Response, error) {
+	parser := newOpenCodeParserWithPolicy(model, schema, "generate", acceptUnverified)
 	scanner := bufio.NewScanner(bytes.NewReader(output))
 	scanner.Buffer(make([]byte, 64*1024), maxOpenCodeEventSize)
 	for scanner.Scan() {
@@ -256,7 +436,7 @@ func openCodeDiagnostic(output []byte) *core.Error {
 		var event openCodeEvent
 		if err := json.Unmarshal(line, &event); err != nil {
 			if decodeErr == nil {
-				decodeErr = fmt.Errorf("decode opencode diagnostic %q: %w", string(line), err)
+				decodeErr = fmt.Errorf("decode opencode diagnostic %q: %w", clipMessage(string(line)), err)
 			}
 			continue
 		}
@@ -269,7 +449,9 @@ func openCodeDiagnostic(output []byte) *core.Error {
 	}
 	if decodeErr != nil {
 		diagnostic := openCodeParseError("generate", decodeErr)
-		diagnostic.Message = fmt.Sprintf("opencode diagnostic output: %q", string(output))
+		// Quote only a bounded head: %q of up to 64 MiB is wasted work.
+		head := output[:min(len(output), 4*maxErrorMessageBytes)]
+		diagnostic.Message = clipMessage(fmt.Sprintf("opencode diagnostic output: %q", string(head)))
 		return diagnostic
 	}
 	return nil
@@ -297,14 +479,20 @@ func openCodeResultError(operation string, code string, message string) *core.Er
 // openCodeFailureError normalizes an error event. opencode nests the message
 // under error.data.message, with error.message used by some failures.
 func openCodeFailureError(event openCodeEvent, operation string) *core.Error {
-	message := event.Error.Data.Message
-	if strings.TrimSpace(message) == "" {
-		message = event.Error.Message
+	// Sanitize before the empty checks: a message that is only escape
+	// sequences or control bytes becomes empty and must fall through.
+	message := clipMessage(event.Error.Data.Message)
+	if message == "" {
+		message = clipMessage(event.Error.Message)
 	}
-	if strings.TrimSpace(message) == "" {
+	if message == "" {
 		message = "opencode run failed"
 	}
-	code := event.Error.Name
+	// The message and code are provider/CLI-controlled and reach caller logs.
+	code := clipMessage(event.Error.Type)
+	if code == "" {
+		code = clipMessage(event.Error.Name)
+	}
 	if code == "" {
 		code = "error"
 	}

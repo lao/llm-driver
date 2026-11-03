@@ -144,7 +144,8 @@ changing the example's generation code.
 
 `opencode` fronts many upstream providers, so its model is a `provider/model`
 id, for example `anthropic/claude-sonnet-4-5` or
-`openrouter/anthropic/claude-sonnet-4.5#high`. `ListModels` runs
+`openrouter/anthropic/claude-sonnet-4.5#high` (a `#variant` pins the effort;
+see Reasoning effort for how that interacts with `Request.Effort`). `ListModels` runs
 `opencode models` and returns every id the installed opencode can actually
 run — opencode resolves its own credentials, provider environment variables,
 and `opencode.json` config:
@@ -216,7 +217,9 @@ and target.
 | Conversation continuation by ID | ✗ | ✗ | ✗ | ✗ | ✗ |
 | Token counting | ✗ | ✗ | ✗ | ✗ | ✗ |
 
-Structured output and reasoning effort are supported on every target. Sampling
+Structured output and reasoning effort are supported on every target; the matrix
+assumes a base `Config.Model` for `opencode/cli`, which rejects effort with an
+empty model or one already carrying a `#variant`. Sampling
 params (temperature/top-p) and the end-user ID map on both API flavors, with
 top-k and stop sequences on `claude/api` only (the Responses API lacks both).
 The remaining optional features are not yet implemented, and later releases flip
@@ -296,7 +299,27 @@ does not accept with `ErrUnsupportedFeature` naming the value and target.
 rejected there; the other targets accept the full set. Each target maps the level
 natively: `claude/api` via `output_config.effort`, `openai/api` via
 `reasoning.effort`, `claude/cli` via `--effort`, `codex/cli` via
-`-c model_reasoning_effort`, and `opencode/cli` via `--variant`.
+`-c model_reasoning_effort`, and `opencode/cli` as the `#variant` suffix of the
+model id (`opencode run --model provider/model#variant`). The opencode CLI
+backend targets 2.x; the driver still recognizes the 1.x `name` error field for
+compatibility.
+
+opencode 2.x has no way to attach an effort to the CLI's default model, so an
+effort with an empty `Config.Model` is rejected with `ErrUnsupportedFeature` —
+set a model to use it. If `Config.Model` already contains a `#variant`,
+`Request.Effort` is rejected for the same reason; put the desired variant in the
+model and leave `Effort` empty. `Client.Supports(FeatureReasoningEffort)` accounts for this and
+returns false for `opencode/cli` with an empty or `#variant`-carrying
+`Config.Model`. When an effort is
+applied, `Response.Model` is the effective id including the `#variant` suffix.
+`Config.Model` should be a base `provider/model` id when you also set `Effort`.
+
+**Breaking for opencode 1.x callers:** the driver targets 2.x and no longer
+sends `--variant`. An effort with an empty `Config.Model` is now rejected with
+`ErrUnsupportedFeature`; set a model and put the desired `#variant` in it to keep
+reasoning control. With a model set, the effort is sent as `--model
+provider/model#variant`, a form 1.x may not accept (likely a model-not-found
+error), so 1.x installs must upgrade.
 
 The example accepts a level via `--effort`:
 
@@ -374,7 +397,24 @@ the hosted APIs:
 - Claude CLI runs in single-shot print mode with the default permission mode,
   so a headless run cannot approve agent tool actions. Codex runs with a
   read-only sandbox; opencode runs non-interactively without `--auto`. Agent
-  CLI behavior can still differ from a hosted model endpoint.
+  CLI behavior can still differ from a hosted model endpoint. An opencode turn
+  that ends on a tool call **without returning text** — commonly a permission
+  auto-reject — fails with code `tool_calls` (carrying the CLI's stderr
+  diagnostic) instead of surfacing as a generic empty response. A turn that
+  emits text and then ends on a tool call fails the same way, since opencode
+  runs its tools itself and never returns `ToolCalls`. A turn the provider stopped on its output cap
+  reports `CompletionReasonMaxTokens` on the response, and carries
+  `Reason: "length"` on the error when the cap was reached before any text.
+  opencode 2.x omits the terminal `step_finish` for a plain text answer. By
+  default, a turn whose completion cannot be verified fails with code
+  `unverified_completion`, even if the process exits successfully. Set
+  `Config.AcceptUnverifiedOpenCode` to true to accept such answers with
+  `CompletionReasonUnverified`; they may be truncated and cannot report
+  `CompletionReasonMaxTokens`. A text-only answer without any `step_finish`
+  has zero usage. Security-relevant consumers must require
+  `CompletionReasonStop` before approval or other actions; consumers accepting
+  unverified answers must validate completeness themselves. Usage and a reason
+  are present only when opencode emits a `step_finish` (for example between tool calls).
 - System text is passed through Claude's system-prompt flag and Codex's
   per-invocation developer-instructions setting. opencode has no system flag, so
   system text is prefixed to the prompt. Conversation text stays on stdin. System
@@ -382,6 +422,10 @@ the hosted APIs:
 - CLI subprocesses inherit the application's working directory and environment
   so local authentication works. Codex's read-only sandbox prevents writes, not
   reads; isolate the host process when prompts are not trusted.
+- CLI error messages can include stderr even after exit 0. Messages are
+  terminal-sanitized and capped at 500 bytes, but secrets, prompt fragments, and
+  paths are not redacted. Filter or suppress error text before logging or
+  forwarding it across trust boundaries.
 - Usage fields are populated only when a target reports them.
 - Streaming chunk granularity is target-defined, like `MaxTokens`. The hosted
   APIs and `claude -p --output-format stream-json --include-partial-messages`

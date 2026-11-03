@@ -14,15 +14,16 @@ type apiBackendConfig struct {
 }
 
 type cliBackendConfig struct {
-	model        string
-	path         string
-	args         []string
-	env          []string
-	dir          string
-	claude       core.ClaudeOptions
-	codex        core.CodexOptions
-	runner       core.CommandRunner
-	streamRunner streamingCommandRunner
+	acceptUnverified bool
+	model            string
+	path             string
+	args             []string
+	env              []string
+	dir              string
+	claude           core.ClaudeOptions
+	codex            core.CodexOptions
+	runner           core.CommandRunner
+	streamRunner     streamingCommandRunner
 }
 
 // withCLIDefaults supplies the executable and runners a CLI backend falls back
@@ -56,14 +57,15 @@ func New(config core.Config, runner core.CommandRunner) (core.Backend, error) {
 		httpClient: config.HTTPClient,
 	}
 	cliConfig := cliBackendConfig{
-		model:  config.Model,
-		path:   config.CLIPath,
-		args:   config.CLIArgs,
-		env:    config.CLIEnv,
-		dir:    config.CLIWorkDir,
-		claude: config.Claude,
-		codex:  config.Codex,
-		runner: runner,
+		acceptUnverified: config.AcceptUnverifiedOpenCode,
+		model:            config.Model,
+		path:             config.CLIPath,
+		args:             config.CLIArgs,
+		env:              config.CLIEnv,
+		dir:              config.CLIWorkDir,
+		claude:           config.Claude,
+		codex:            config.Codex,
+		runner:           runner,
 	}
 
 	switch {

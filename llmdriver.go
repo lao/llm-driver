@@ -33,7 +33,9 @@ type (
 	// Response is a provider-neutral text generation result.
 	Response = core.Response
 	// Error adds target and operation context to configuration and runtime
-	// failures.
+	// failures. For CLI targets, process-exit errors use a nonzero Status with
+	// empty Reason and Code; API/result errors populate at least one of those
+	// fields.
 	Error = core.Error
 	// Chunk is one incremental piece of a streaming response.
 	Chunk = core.Chunk
@@ -64,8 +66,9 @@ const (
 	ProviderClaude = core.ProviderClaude
 	// ProviderOpenAI selects OpenAI.
 	ProviderOpenAI = core.ProviderOpenAI
-	// ProviderOpenCode selects the local opencode agent CLI. Its model is a
-	// "provider/model" id from `opencode models` (see ListModels).
+	// ProviderOpenCode selects the local opencode agent CLI (2.x). Its model is
+	// a "provider/model" id from `opencode models` (see ListModels); Effort is
+	// appended as the "#variant" suffix used by opencode run --model.
 	ProviderOpenCode = core.ProviderOpenCode
 	// FlavorAPI invokes a provider's hosted API through its official Go SDK.
 	FlavorAPI = core.FlavorAPI
@@ -85,6 +88,15 @@ const (
 	CompletionReasonToolUse = core.CompletionReasonToolUse
 	// CompletionReasonContentFilter indicates that a content filter stopped generation.
 	CompletionReasonContentFilter = core.CompletionReasonContentFilter
+	// CompletionReasonUnverified means no terminal finish reason was reported;
+	// truncation cannot be ruled out (opencode 2.x text-only turns).
+	CompletionReasonUnverified = core.CompletionReasonUnverified
+	// CodeMissingFinalMessage identifies a completed Codex CLI turn that emitted
+	// no completed agent message.
+	CodeMissingFinalMessage = core.CodeMissingFinalMessage
+	// CodeToolCalls identifies a CLI turn that ended to call a tool without
+	// producing response text.
+	CodeToolCalls = core.CodeToolCalls
 
 	// EffortLow requests the lowest reasoning effort.
 	EffortLow = core.EffortLow

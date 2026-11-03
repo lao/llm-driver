@@ -88,6 +88,10 @@ type Config struct {
 	// inherits the parent's.
 	CLIWorkDir string
 
+	// AcceptUnverifiedOpenCode allows OpenCode responses without a verified finish.
+	// Such responses may be truncated and have CompletionReasonUnverified.
+	AcceptUnverifiedOpenCode bool
+
 	// Claude carries Claude CLI flags. Ignored by API flavors and OpenAI.
 	Claude ClaudeOptions
 	// Codex carries Codex CLI flags. Ignored by API flavors and Claude.

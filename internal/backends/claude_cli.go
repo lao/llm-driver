@@ -61,7 +61,7 @@ func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (
 	args = appendClaudeSystemArgs(args, request.System, b.claude.ReplaceSystemPrompt)
 	args = append(args, b.args...)
 
-	stdout, err := executeCLI(
+	stdout, stderr, err := executeCLI(
 		ctx,
 		core.ProviderClaude,
 		b.path,
@@ -86,7 +86,7 @@ func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (
 					if diagnostic.Status == 0 {
 						diagnostic.Status = processError.Status
 					}
-					return nil, diagnostic
+					return nil, attachCLIStderr(diagnostic, stderr)
 				}
 			}
 		}
@@ -94,10 +94,10 @@ func (b *claudeCLIBackend) Generate(ctx context.Context, request core.Request) (
 	}
 	response, err := parseClaudeCLIOutput(stdout, b.model)
 	if err != nil {
-		return nil, err
+		return nil, attachCLIStderr(err, stderr)
 	}
 	if err := setStructuredOutput(response, request.OutputSchema, core.ProviderClaude, core.FlavorCLI, "generate"); err != nil {
-		return nil, err
+		return nil, attachCLIStderr(err, stderr)
 	}
 	return response, nil
 }
@@ -272,7 +272,7 @@ func claudeCLIResponse(result claudeCLIResult, model string, operation string) (
 			Flavor:    core.FlavorCLI,
 			Operation: operation,
 			Status:    result.APIErrorStatus,
-			Reason:    result.TerminalReason,
+			Reason:    clipMessage(result.TerminalReason),
 			Code:      claudeCLIErrorCode(result),
 			Message:   clipMessage(message),
 		}
@@ -311,14 +311,15 @@ func claudeCompletionReason(stopReason string) core.CompletionReason {
 }
 
 func claudeCLIErrorCode(result claudeCLIResult) string {
-	if result.Subtype != "" && result.Subtype != "success" {
-		return result.Subtype
+	// Sanitize before the empty checks so a control-only value falls through.
+	if subtype := clipMessage(result.Subtype); subtype != "" && subtype != "success" {
+		return subtype
 	}
 	if result.IsError {
 		return "error"
 	}
-	if result.Type != "" && result.Type != "result" {
-		return result.Type
+	if typ := clipMessage(result.Type); typ != "" && typ != "result" {
+		return typ
 	}
 	return "unsuccessful_result"
 }

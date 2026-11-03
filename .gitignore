@@ -16,3 +16,6 @@ coverage.*
 .DS_Store
 .idea/
 .vscode/
+
+# graft local cache
+graft/.cache/

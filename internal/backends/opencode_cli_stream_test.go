@@ -41,6 +41,14 @@ func TestOpenCodeCLIStreamCommand(t *testing.T) {
 			wantPrompt: "Hello from stdin",
 		},
 		{
+			name:       "reasoning effort is encoded in the model id",
+			config:     core.Config{Provider: core.ProviderOpenCode, Flavor: core.FlavorCLI, Model: "anthropic/claude-sonnet-4-5"},
+			request:    core.Request{MaxTokens: 32, Messages: []core.Message{core.User("q")}, Effort: core.EffortHigh},
+			wantPath:   "opencode",
+			wantArgs:   []string{"run", "--format", "json", "--model", "anthropic/claude-sonnet-4-5#high"},
+			wantPrompt: "q",
+		},
+		{
 			name: "system and multi turn with custom CLI settings",
 			config: core.Config{
 				Provider: core.ProviderOpenCode,
@@ -116,6 +124,131 @@ func TestOpenCodeCLIStreamSuccess(t *testing.T) {
 	if response.Usage != wantUsage {
 		t.Fatalf("usage = %+v, want %+v", response.Usage, wantUsage)
 	}
+	if response.CompletionReason != core.CompletionReasonStop {
+		t.Fatalf("completion reason = %q, want %q", response.CompletionReason, core.CompletionReasonStop)
+	}
+}
+
+// TestOpenCodeCLIStreamTextOnlyCompletes covers the opencode 2.x stream: the
+// process ends after the text part with no terminal step_finish. The stream
+// must return the text rather than a missing_step_finish error.
+func TestOpenCodeCLIStreamTextOnlyCompletes(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeStreamingRunner{lines: []string{
+		`{"type":"step_start","sessionID":"ses_123","part":{"id":"prt_1","type":"step-start"}}`,
+		`{"type":"text","sessionID":"ses_123","part":{"id":"prt_2","type":"text","text":"finished answer"}}`,
+	}}
+	client := newCLIStreamClient(core.Config{
+		AcceptUnverifiedOpenCode: true,
+		Provider:                 core.ProviderOpenCode,
+		Flavor:                   core.FlavorCLI,
+		Model:                    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+
+	stream, err := client.GenerateStream(context.Background(), core.Request{
+		MaxTokens: 32,
+		Messages:  []core.Message{core.User("Hello")},
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+
+	_, err, response := collectStream(t, stream)
+	if err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	if response.Text != "finished answer" {
+		t.Fatalf("Text = %q, want %q", response.Text, "finished answer")
+	}
+	if response.CompletionReason != core.CompletionReasonUnverified || response.Usage != (core.Usage{}) {
+		t.Fatalf("response = %+v, want unverified reason and zero usage without step_finish", response)
+	}
+}
+
+// A clean exit can still end on a result error (a headless run that
+// auto-rejected a tool); the stderr explanation must reach the error.
+func TestOpenCodeCLIStreamCleanExitCarriesStderr(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeStreamingRunner{
+		lines: []string{
+			`{"type":"tool_use","sessionID":"ses_1","part":{"type":"tool","tool":"read"}}`,
+			`{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_1","type":"step-finish","reason":"tool-calls"}}`,
+		},
+		stderr: []byte("permission denied\n"),
+	}
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderOpenCode,
+		Flavor:   core.FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	stream, err := client.GenerateStream(context.Background(), core.Request{MaxTokens: 32, Messages: []core.Message{core.User("q")}})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+	_, err, _ = collectStream(t, stream)
+	var contextual *core.Error
+	if !errors.As(err, &contextual) {
+		t.Fatalf("stream error = %T %v, want *core.Error", err, err)
+	}
+	if contextual.Code != core.CodeToolCalls {
+		t.Fatalf("code = %q, want %q", contextual.Code, core.CodeToolCalls)
+	}
+	if !strings.Contains(contextual.Message, "permission denied") {
+		t.Fatalf("message = %q, want the stderr diagnostic", contextual.Message)
+	}
+}
+
+// Finish is valid only after the stream is drained. A caller that finalizes
+// early must not get partial text presented as a completed answer.
+func TestOpenCodeCLIStreamFinishBeforeExit(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeStreamingRunner{lines: []string{
+		`{"type":"text","sessionID":"ses_1","part":{"id":"prt_1","type":"text","text":"partial"}}`,
+	}}
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderOpenCode,
+		Flavor:   core.FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	stream, err := client.GenerateStream(context.Background(), core.Request{MaxTokens: 32, Messages: []core.Message{core.User("q")}})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+	_, err = stream.source.Finish()
+	var contextual *core.Error
+	if !errors.As(err, &contextual) {
+		t.Fatalf("Finish() error = %T %v, want *core.Error", err, err)
+	}
+	if contextual.Code != "incomplete_stream" {
+		t.Fatalf("code = %q, want incomplete_stream", contextual.Code)
+	}
+}
+
+func TestOpenCodeCompletionReason(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		reason string
+		want   core.CompletionReason
+	}{
+		{reason: "stop", want: core.CompletionReasonStop},
+		{reason: "tool-calls", want: ""},
+		{reason: "length", want: core.CompletionReasonMaxTokens},
+		{reason: "content-filter", want: core.CompletionReasonContentFilter},
+		{reason: "", want: ""},
+		{reason: "future-reason", want: ""},
+	}
+	for _, test := range tests {
+		if got := openCodeCompletionReason(test.reason); got != test.want {
+			t.Fatalf("openCodeCompletionReason(%q) = %q, want %q", test.reason, got, test.want)
+		}
+	}
 }
 
 func TestOpenCodeCLIStreamStructuredOutput(t *testing.T) {
@@ -168,6 +301,7 @@ func TestOpenCodeCLIStreamErrors(t *testing.T) {
 		wantIs     error
 		wantStatus int
 		wantCode   string
+		wantReason string
 		startFails bool
 	}{
 		{
@@ -203,14 +337,24 @@ func TestOpenCodeCLIStreamErrors(t *testing.T) {
 			wantCode: "ProviderError",
 		},
 		{
-			name:     "missing step finish",
-			runner:   &fakeStreamingRunner{lines: openCodeStreamLines()[:3]},
+			name:     "missing step finish and text",
+			runner:   &fakeStreamingRunner{lines: []string{`{"type":"step_start","sessionID":"ses_1"}`}},
 			wantCode: "missing_step_finish",
 		},
 		{
-			name:     "missing text",
-			runner:   &fakeStreamingRunner{lines: openCodeStreamLines()[3:]},
-			wantCode: "missing_text",
+			name:       "missing text",
+			runner:     &fakeStreamingRunner{lines: openCodeStreamLines()[3:]},
+			wantCode:   "missing_text",
+			wantReason: "stop",
+		},
+		{
+			name: "tool call ended without text",
+			runner: &fakeStreamingRunner{lines: []string{
+				`{"type":"tool_use","sessionID":"ses_1","part":{"type":"tool","tool":"glob","state":{"status":"completed"}}}`,
+				`{"type":"step_finish","sessionID":"ses_1","part":{"id":"prt_1","type":"step-finish","reason":"tool-calls","tokens":{}}}`,
+			}},
+			wantCode:   core.CodeToolCalls,
+			wantReason: "tool-calls",
 		},
 	}
 
@@ -249,6 +393,9 @@ func TestOpenCodeCLIStreamErrors(t *testing.T) {
 			}
 			if target.Status != test.wantStatus || target.Code != test.wantCode {
 				t.Fatalf("status/code = %d/%q, want %d/%q", target.Status, target.Code, test.wantStatus, test.wantCode)
+			}
+			if target.Reason != test.wantReason {
+				t.Fatalf("reason = %q, want %q", target.Reason, test.wantReason)
 			}
 			if test.wantIs != nil && !errors.Is(err, test.wantIs) {
 				t.Fatalf("stream error = %v, want errors.Is(%v)", err, test.wantIs)
@@ -296,5 +443,185 @@ func TestOpenCodeCLIStreamDeliversChunksBeforeExit(t *testing.T) {
 	}
 	if strings.Join(chunks, "|") != "world" || response.Text != "Hello, world" {
 		t.Fatalf("chunks = %#v, response = %+v", chunks, response)
+	}
+}
+
+func TestOpenCodeParserDedupesStepFinishAndRejectsTerminalToolCalls(t *testing.T) {
+	t.Parallel()
+
+	finish := `{"type":"step_finish","part":{"id":"prt_f","reason":"stop","tokens":{"input":4,"output":2}}}`
+	parser := newOpenCodeParser("m", nil, "generate")
+	for _, line := range []string{
+		`{"type":"text","part":{"id":"prt_t","text":"hi"}}`, finish, finish,
+	} {
+		if _, err := parser.event([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := parser.response()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Usage.InputTokens != 4 || response.Usage.OutputTokens != 2 {
+		t.Fatalf("usage double counted: %+v", response.Usage)
+	}
+
+	parser = newOpenCodeParser("m", nil, "generate")
+	for _, line := range []string{
+		`{"type":"text","part":{"id":"prt_t","text":"let me check"}}`,
+		`{"type":"step_finish","part":{"id":"prt_f","reason":"tool-calls"}}`,
+	} {
+		if _, err := parser.event([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err = parser.response()
+	var coreErr *core.Error
+	if !errors.As(err, &coreErr) || coreErr.Code != core.CodeToolCalls {
+		t.Fatalf("want tool_calls error, got %v", err)
+	}
+}
+
+func TestOpenCodeFailureErrorFallsBackWhenMessageSanitizesEmpty(t *testing.T) {
+	t.Parallel()
+
+	parser := newOpenCodeParser("m", nil, "generate")
+	_, err := parser.event([]byte(`{"type":"error","error":{"name":"X","data":{"message":"\u001b[2J\u0007"},"message":"real reason"}}`))
+	var coreErr *core.Error
+	if !errors.As(err, &coreErr) || coreErr.Message != "real reason" {
+		t.Fatalf("want fallback to error.message, got %v", err)
+	}
+}
+
+func TestOpenCodeParserRedeliveredToolFinishAfterTextKeepsAnswer(t *testing.T) {
+	t.Parallel()
+
+	toolFinish := `{"type":"step_finish","part":{"id":"prt_f1","reason":"tool-calls"}}`
+	parser := newOpenCodeParserWithPolicy("m", nil, "generate", true)
+	for _, line := range []string{
+		`{"type":"text","part":{"id":"prt_t1","text":"checking"}}`, toolFinish,
+		`{"type":"text","part":{"id":"prt_t2","text":" done"}}`, toolFinish,
+	} {
+		if _, err := parser.event([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := parser.response()
+	if err != nil || response.Text != "checking done" {
+		t.Fatalf("response = %+v, err = %v", response, err)
+	}
+}
+
+func TestOpenCodeFailureErrorCodeFallsBackWhenTypeSanitizesEmpty(t *testing.T) {
+	t.Parallel()
+
+	parser := newOpenCodeParser("m", nil, "generate")
+	_, err := parser.event([]byte(`{"type":"error","error":{"type":"\u001b[2J\u0007","name":"X","message":"boom"}}`))
+	var coreErr *core.Error
+	if !errors.As(err, &coreErr) || coreErr.Code != "X" {
+		t.Fatalf("want code fallback to name, got %v", err)
+	}
+}
+
+func TestOpenCodeDiagnosticClipsUndecodableOutput(t *testing.T) {
+	t.Parallel()
+
+	diagnostic := openCodeDiagnostic([]byte(strings.Repeat("x", 5*maxErrorMessageBytes)))
+	if diagnostic == nil || len(diagnostic.Message) > maxErrorMessageBytes {
+		t.Fatalf("diagnostic message not clipped: %v", diagnostic)
+	}
+}
+
+func TestOpenCodeParserGrowingPartKeepsFinishReason(t *testing.T) {
+	t.Parallel()
+
+	parser := newOpenCodeParser("m", nil, "generate")
+	for _, line := range []string{
+		`{"type":"text","part":{"id":"prt_t","text":"cut"}}`,
+		`{"type":"step_finish","part":{"id":"prt_f","reason":"length"}}`,
+		`{"type":"text","part":{"id":"prt_t","text":"cut off"}}`,
+	} {
+		if _, err := parser.event([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := parser.response()
+	if err != nil || response.CompletionReason != core.CompletionReasonMaxTokens {
+		t.Fatalf("response = %+v, err = %v", response, err)
+	}
+}
+
+func TestOpenCodeParserErrorFinishAfterTextFailsAndUnknownReasonIsUnverified(t *testing.T) {
+	t.Parallel()
+
+	run := func(reason string) (*core.Response, error) {
+		parser := newOpenCodeParserWithPolicy("m", nil, "generate", true)
+		for _, line := range []string{
+			`{"type":"text","part":{"id":"prt_t","text":"partial"}}`,
+			`{"type":"step_finish","part":{"id":"prt_f","reason":"` + reason + `"}}`,
+		} {
+			if _, err := parser.event([]byte(line)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return parser.response()
+	}
+	_, err := run("error")
+	var coreErr *core.Error
+	if !errors.As(err, &coreErr) || coreErr.Code != "step_error" {
+		t.Fatalf("want step_error, got %v", err)
+	}
+	response, err := run("other")
+	if err != nil || response.CompletionReason != core.CompletionReasonUnverified {
+		t.Fatalf("response = %+v, err = %v", response, err)
+	}
+}
+
+func TestOpenCodeDiagnosticClipsWrappedCause(t *testing.T) {
+	t.Parallel()
+
+	diagnostic := openCodeDiagnostic([]byte("{" + strings.Repeat("x", 10*maxErrorMessageBytes)))
+	if diagnostic == nil || diagnostic.Err == nil || len(diagnostic.Err.Error()) > 2*maxErrorMessageBytes {
+		t.Fatalf("wrapped cause not clipped: %v", diagnostic)
+	}
+}
+
+// A parser failure mid-stream (an opencode error event) must carry the stderr
+// once the process has exited, like the clean-exit path.
+func TestOpenCodeCLIStreamMidStreamFailureCarriesStderr(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeStreamingRunner{
+		lines:  []string{`{"type":"error","error":{"name":"APIError","data":{"message":"boom"}}}`},
+		stderr: []byte("quota exhausted\n"),
+	}
+	client := newCLIStreamClient(core.Config{
+		Provider: core.ProviderOpenCode,
+		Flavor:   core.FlavorCLI,
+		Model:    "anthropic/claude-sonnet-4-5",
+	}, runner.run)
+	stream, err := client.GenerateStream(context.Background(), core.Request{MaxTokens: 32, Messages: []core.Message{core.User("q")}})
+	if err != nil {
+		t.Fatalf("GenerateStream(): %v", err)
+	}
+	defer stream.Close()
+	_, err, _ = collectStream(t, stream)
+	if err == nil || !strings.Contains(err.Error(), "boom") || !strings.Contains(err.Error(), "quota exhausted") {
+		t.Fatalf("stream error = %v, want message and stderr", err)
+	}
+}
+
+func TestOpenCodeParserNewStepInvalidatesPreviousFinish(t *testing.T) {
+	for _, event := range []string{`{"type":"step_start"}`, `{"type":"tool_use"}`} {
+		p := newOpenCodeParserWithPolicy("model", nil, "generate", true)
+		for _, line := range []string{`{"type":"text","part":{"id":"text","text":"answer"}}`, `{"type":"step_finish","part":{"id":"finish","reason":"stop"}}`, event} {
+			if _, err := p.event([]byte(line)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		response, err := p.response()
+		if err != nil || response.CompletionReason != core.CompletionReasonUnverified {
+			t.Fatalf("after %s: response = %+v, error = %v", event, response, err)
+		}
 	}
 }

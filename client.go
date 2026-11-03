@@ -53,7 +53,7 @@ func (c *Client) Generate(ctx context.Context, request Request) (*Response, erro
 			Err:       err,
 		}
 	}
-	if err := core.ValidateRequestFor(c.provider, c.flavor, request); err != nil {
+	if err := core.ValidateRequestFor(c.provider, c.flavor, c.model, request); err != nil {
 		return nil, &Error{
 			Provider:  c.provider,
 			Flavor:    c.flavor,
@@ -87,6 +87,11 @@ func (c *Client) Generate(ctx context.Context, request Request) (*Response, erro
 // It answers straight from the capability table Generate and GenerateStream
 // validate against; a request exercising only supported features passes that
 // validation, and an unsupported one fails with ErrUnsupportedFeature.
+//
+// One exception depends on the configured model: opencode 2.x encodes effort as
+// the model's #variant suffix, so FeatureReasoningEffort is false for opencode/cli
+// with an empty Model or a Model that already carries a #variant, matching the
+// ErrUnsupportedFeature Generate returns for those configurations.
 func (c *Client) Supports(feature Feature) bool {
-	return core.Supports(c.provider, c.flavor, feature)
+	return core.Supports(c.provider, c.flavor, c.model, feature)
 }

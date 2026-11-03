@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/lao/llm-driver/internal/core"
@@ -36,18 +37,144 @@ var errCLIOutputTooLarge = errors.New("llmdriver: CLI output exceeds limit")
 // model-sized result or a large stderr dump does not bloat a single log line.
 const maxErrorMessageBytes = 500
 
-// clipMessage trims surrounding whitespace and caps a CLI-derived message on a
-// UTF-8 rune boundary.
+// clipMessage strips terminal escape sequences and control characters, trims
+// surrounding whitespace, and caps a CLI-derived message on a UTF-8 rune
+// boundary.
 func clipMessage(s string) string {
+	return clipMessageTo(s, maxErrorMessageBytes)
+}
+
+// sanitizeWindowFactor is how many budgets of raw input clipMessageTo and
+// clipTailTo sanitize before clipping.
+const sanitizeWindowFactor = 4
+
+// clipMessageTo is clipMessage with an explicit byte budget, used when a
+// diagnostic is appended to existing text.
+func clipMessageTo(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	// Bound the sanitizer's work: escape stripping only shrinks text, so a
+	// generous multiple of the budget still fills it for ordinary output.
+	if w := limit * sanitizeWindowFactor; len(s) > w {
+		end := w
+		for end > 0 && !utf8.RuneStart(s[end]) {
+			end--
+		}
+		s = s[:end]
+	}
+	s = sanitizeTerminal(s)
 	s = strings.TrimSpace(s)
-	if len(s) <= maxErrorMessageBytes {
+	if len(s) <= limit {
 		return s
 	}
-	end := maxErrorMessageBytes
+	end := limit
 	for end > 0 && !utf8.RuneStart(s[end]) {
 		end--
 	}
 	return s[:end]
+}
+
+// clipTailTo is clipMessageTo keeping the end of the text: stderr from agent
+// CLIs puts warnings first and the fatal line last, so the tail is the evidence.
+func clipTailTo(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if w := limit * sanitizeWindowFactor; len(s) > w {
+		start := len(s) - w
+		for start < len(s) && !utf8.RuneStart(s[start]) {
+			start++
+		}
+		s = s[start:]
+	}
+	s = strings.TrimSpace(sanitizeTerminal(s))
+	if len(s) <= limit {
+		return s
+	}
+	start := len(s) - limit
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return strings.TrimSpace(s[start:])
+}
+
+// sanitizeTerminal removes ECMA-48 escape sequences and control characters from
+// CLI/provider diagnostics before they reach a log line or terminal. It covers
+// CSI (including private parameter bytes), OSC/DCS/SOS/PM/APC through their
+// BEL/ST terminator, other ESC sequences, and C0/C1 controls. Tabs, newlines and
+// other line separators become a space so untrusted text cannot forge a log
+// record; Unicode bidi/format controls are dropped.
+func sanitizeTerminal(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] != 0x1b {
+			r, size := utf8.DecodeRuneInString(s[i:])
+			if r == utf8.RuneError && size == 1 {
+				i++
+				continue
+			}
+			switch {
+			case r == '\t' || r == '\n' || r == '\r' || r == 0x2028 || r == 0x2029:
+				b.WriteByte(' ')
+			case (unicode.Is(unicode.Cf, r) && r != 0x200c && r != 0x200d) || unicode.Is(unicode.Bidi_Control, r) || (r >= 0xE0000 && r <= 0xE007F):
+				// Bidi/format controls can visually reorder a log line; the tag
+				// block can hide an invisible payload. ZWNJ/ZWJ are kept: they
+				// carry meaning in several scripts and emoji sequences.
+			case r >= 0x20 && r != 0x7f && !(r >= 0x80 && r <= 0x9f):
+				b.WriteString(s[i : i+size])
+			}
+			i += size
+			continue
+		}
+		i++ // ESC
+		if i >= len(s) {
+			break
+		}
+		switch s[i] {
+		case '[': // CSI: parameter bytes, intermediate bytes, final byte.
+			i++
+			for i < len(s) && s[i] >= 0x30 && s[i] <= 0x3f {
+				i++
+			}
+			for i < len(s) && s[i] >= 0x20 && s[i] <= 0x2f {
+				i++
+			}
+			if i < len(s) && s[i] >= 0x40 && s[i] <= 0x7e {
+				i++
+			}
+		case ']', 'P', 'X', '^', '_': // OSC/DCS/SOS/PM/APC: through BEL or ST.
+			i++
+			for i < len(s) {
+				if s[i] == 0x07 {
+					i++
+					break
+				}
+				if s[i] == '\n' {
+					// Unterminated: stop so a malformed sequence cannot erase
+					// the following lines (the newline is handled normally).
+					break
+				}
+				if s[i] == 0x1b {
+					if i+1 < len(s) && s[i+1] == '\\' {
+						i += 2
+					}
+					// Any other ESC starts a new sequence: the OSC was
+					// unterminated, so resume normal parsing at that ESC.
+					break
+				}
+				i++
+			}
+		default: // ESC + optional intermediates + final byte.
+			for i < len(s) && s[i] >= 0x20 && s[i] <= 0x2f {
+				i++
+			}
+			if i < len(s) && s[i] >= 0x30 && s[i] <= 0x7e {
+				i++
+			}
+		}
+	}
+	return b.String()
 }
 
 type boundedBuffer struct {
@@ -139,6 +266,11 @@ func runCLI(
 	return stdout.Bytes(), stderr.Bytes(), 0, err
 }
 
+// executeCLI runs a batch CLI invocation and normalizes launch and exit
+// failures. It returns stdout and stderr even on a nonzero exit, so a caller
+// can surface a diagnostic the CLI printed instead of the generic process
+// error. stderr is returned on success too: an agent CLI can exit 0 after
+// auto-rejecting a tool permission and leave the only explanation on stderr.
 func executeCLI(
 	ctx context.Context,
 	provider core.Provider,
@@ -146,23 +278,23 @@ func executeCLI(
 	args []string,
 	stdin []byte,
 	runner core.CommandRunner,
-) ([]byte, error) {
+) ([]byte, []byte, error) {
 	stdout, stderr, exitCode, err := runner(ctx, name, args, stdin)
 	if err != nil {
-		return nil, &core.Error{
+		return nil, stderr, &core.Error{
 			Provider:  provider,
 			Flavor:    core.FlavorCLI,
 			Operation: "generate",
-			Message:   clipMessage(string(stderr)),
+			Message:   clipTailTo(string(stderr), maxErrorMessageBytes),
 			Err:       err,
 		}
 	}
 	if exitCode != 0 {
-		message := clipMessage(string(stderr))
+		message := clipTailTo(string(stderr), maxErrorMessageBytes)
 		if message == "" {
 			message = "CLI command failed"
 		}
-		return stdout, &core.Error{
+		return stdout, stderr, &core.Error{
 			Provider:  provider,
 			Flavor:    core.FlavorCLI,
 			Operation: "generate",
@@ -170,7 +302,7 @@ func executeCLI(
 			Message:   message,
 		}
 	}
-	return stdout, nil
+	return stdout, stderr, nil
 }
 
 // cliProcess is a running provider CLI whose stdout is consumed incrementally.
@@ -313,6 +445,13 @@ type cliChunkStream struct {
 	scanner  *bufio.Scanner
 	parser   cliEventParser
 	failure  error
+	// stderr is cached by exit() so Finish can attach a clean-exit diagnostic
+	// without waiting on the process a second time.
+	stderr []byte
+	// exited records that exit() observed the process end. Finish only builds a
+	// response when this is true, for every turn; for a text-only turn it is
+	// the half of "completed process plus text" the parser cannot see.
+	exited bool
 }
 
 func newCLIChunkStream(provider core.Provider, process cliProcess, parser cliEventParser) *cliChunkStream {
@@ -357,7 +496,54 @@ func (s *cliChunkStream) Recv() (core.Chunk, error) {
 }
 
 func (s *cliChunkStream) Finish() (*core.Response, error) {
-	return s.parser.response()
+	if s.failure != nil {
+		return nil, s.failure
+	}
+	if !s.exited {
+		failure := s.streamError(nil, "stream finished before the CLI exited")
+		failure.Code = "incomplete_stream"
+		return nil, failure
+	}
+	response, err := s.parser.response()
+	return response, attachCLIStderr(err, s.stderr)
+}
+
+// attachCLIStderr adds a non-empty stderr diagnostic to a CLI result error. A
+// headless CLI can exit 0 after a result error (an auto-rejected tool, say),
+// and the explanation is only on stderr.
+func attachCLIStderr(err error, stderr []byte) error {
+	if err == nil {
+		return nil
+	}
+	var contextual *core.Error
+	if !errors.As(err, &contextual) {
+		return err
+	}
+	const separator = ": "
+	detail := clipTailTo(string(stderr), maxErrorMessageBytes-len(separator))
+	if detail == "" {
+		return err
+	}
+	base := contextual.Message
+	if base == "" && contextual.Err != nil {
+		// Error() prefers Message over Err; keep the cause visible next to
+		// the stderr instead of hiding it behind a warning.
+		base = contextual.Err.Error()
+	}
+	if base == "" {
+		contextual.Message = detail
+		return err
+	}
+	// Reserve room for the stderr tail: it is the evidence the caller needs, so
+	// truncating the appended part would defeat the purpose.
+	room := maxErrorMessageBytes - len(detail) - len(separator)
+	if room <= 0 {
+		// The diagnostic fills the budget; do not emit a bare separator.
+		contextual.Message = detail
+		return err
+	}
+	contextual.Message = clipMessageTo(base, room) + separator + detail
+	return err
 }
 
 func (s *cliChunkStream) Close() error {
@@ -375,18 +561,23 @@ func (s *cliChunkStream) Close() error {
 func (s *cliChunkStream) fail(err error) error {
 	s.failure = err
 
-	done := make(chan int, 1)
+	type exitResult struct {
+		code   int
+		stderr []byte
+	}
+	done := make(chan exitResult, 1)
 	go func() {
 		drained, _ := io.Copy(io.Discard, io.LimitReader(s.process.stdout(), maxCLIOutputBytes))
 		if drained >= maxCLIOutputBytes {
-			done <- 0
+			done <- exitResult{}
 			return
 		}
-		exitCode, _, waitErr := s.process.wait()
+		exitCode, stderr, waitErr := s.process.wait()
 		if waitErr != nil {
-			exitCode = 0
+			done <- exitResult{}
+			return
 		}
-		done <- exitCode
+		done <- exitResult{exitCode, stderr}
 	}()
 
 	timer := time.NewTimer(cliFailDrainTimeout)
@@ -394,25 +585,27 @@ func (s *cliChunkStream) fail(err error) error {
 	select {
 	case <-timer.C:
 		return err
-	case exitCode := <-done:
-		if exitCode == 0 {
-			return err
-		}
+	case result := <-done:
 		var contextual *core.Error
-		if errors.As(err, &contextual) && contextual.Status == 0 {
-			contextual.Status = exitCode
+		if result.code != 0 && errors.As(err, &contextual) && contextual.Status == 0 {
+			contextual.Status = result.code
 		}
-		return err
+		// The process ended, so its stderr is available for the same
+		// diagnostic a clean-exit result error carries.
+		s.failure = attachCLIStderr(err, result.stderr)
+		return s.failure
 	}
 }
 
 func (s *cliChunkStream) exit() error {
 	exitCode, stderr, err := s.process.wait()
+	s.stderr = stderr
+	s.exited = true
 	if err != nil {
-		return s.streamError(err, clipMessage(string(stderr)))
+		return s.streamError(err, clipTailTo(string(stderr), maxErrorMessageBytes))
 	}
 	if exitCode != 0 {
-		message := clipMessage(string(stderr))
+		message := clipTailTo(string(stderr), maxErrorMessageBytes)
 		if message == "" {
 			message = "CLI command failed"
 		}

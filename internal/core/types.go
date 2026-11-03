@@ -172,7 +172,9 @@ type Request struct {
 	OutputSchema *OutputSchema `json:"output_schema,omitempty"`
 	// Effort optionally selects a reasoning-effort level. The zero value ""
 	// leaves it unset. A value the target does not support is rejected with
-	// ErrUnsupportedFeature before invocation.
+	// ErrUnsupportedFeature before invocation. opencode 2.x cannot attach an
+	// effort to an empty Model or override a variant already in Model; those
+	// combinations are rejected, so put the desired #variant in Model.
 	Effort Effort `json:"effort,omitempty"`
 	// Temperature optionally sets the sampling temperature. Nil leaves it unset.
 	// It is passed through to API flavors (validated only as non-negative and
@@ -222,17 +224,25 @@ const (
 	CompletionReasonMaxTokens CompletionReason = "max_tokens"
 	// CompletionReasonRefusal indicates that the model returned a refusal.
 	CompletionReasonRefusal CompletionReason = "refusal"
-	// CompletionReasonToolUse indicates that generation ended to call a tool.
+	// CompletionReasonToolUse indicates that generation ended with a tool call.
 	CompletionReasonToolUse CompletionReason = "tool_use"
 	// CompletionReasonContentFilter indicates that a content filter stopped generation.
 	CompletionReasonContentFilter CompletionReason = "content_filter"
+	// CompletionReasonUnverified indicates that the target did not report a
+	// terminal finish reason, so truncation cannot be ruled out. opencode 2.x
+	// plain text answers are the current case: they end without a step_finish.
+	CompletionReasonUnverified CompletionReason = "unverified"
 )
 
 // Response is a provider-neutral text generation result.
 type Response struct {
 	// ID is the provider response or CLI session/thread identifier, when reported.
 	ID string `json:"id,omitempty"`
-	// Model is the configured or provider-reported model name.
+	// Model is the model that produced the response: the configured id, or the
+	// provider-reported name when it differs. opencode 2.x includes the effective
+	// #variant suffix here. Config.Model should be a base provider/model id when
+	// Request.Effort is set; an id that already carries a #variant (ListModels
+	// may return one) pins the effort and rejects Request.Effort.
 	Model string `json:"model"`
 	// Text is the normalized response text.
 	Text string `json:"text"`

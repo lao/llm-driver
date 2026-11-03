@@ -17,7 +17,29 @@ JSON-schema flag, its structured output states the schema in the prompt and
 validates the returned document, failing `invalid_structured_output` on a
 non-JSON answer. `ListModels` runs `opencode models` to discover the
 `provider/model` ids the installed opencode can use, and `Config.Model` accepts
-any such id.
+any such id. opencode 2.x encodes reasoning effort as the model id's `#variant`
+suffix (`Response.Model` carries the effective id); an effort with an empty
+model or a model that already names a variant is rejected with
+`ErrUnsupportedFeature`, because 2.x has no default-model form and cannot
+override an inline variant. A plain text turn may omit the terminal
+`step_finish`. Unverified completion fails with `unverified_completion` by
+default; setting `Config.AcceptUnverifiedOpenCode` accepts it with
+`CompletionReasonUnverified`, even though truncation cannot be ruled out. A
+text-only turn with no `step_finish` has zero usage. A tool-only turn fails
+with a `tool_calls` error, and a step that finishes on `error` after partial
+text fails with a `step_error` error.
+
+Security-relevant callers (including automated review/approval consumers) must
+check `CompletionReason` before acting and require `CompletionReasonStop`;
+reject unverified, capped, or otherwise non-stop results and discard streamed
+partial text on error. Consumers that accept unverified text must validate their
+own completeness criteria before using it to authorize an action. This SDK
+cannot enforce checks in downstream consumers.
+
+CLI error messages may include stderr after both nonzero and clean exits.
+Diagnostics are terminal-sanitized and bounded to 500 bytes, but not redacted:
+paths, prompt fragments, and credentials can remain. Callers must filter or
+suppress error text before sending it to logs or other trust domains.
 
 Scope decision (approved): **generation parity only.** Platform APIs that a
 CLI can never serve (embeddings, batches, files CRUD, audio, images
