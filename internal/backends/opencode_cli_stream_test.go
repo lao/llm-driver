@@ -197,6 +197,9 @@ func TestOpenCodeCLIStreamCleanExitCarriesStderr(t *testing.T) {
 	if contextual.Code != core.CodeToolCalls {
 		t.Fatalf("code = %q, want %q", contextual.Code, core.CodeToolCalls)
 	}
+	if contextual.SessionID != "ses_1" {
+		t.Fatalf("session ID = %q, want ses_1", contextual.SessionID)
+	}
 	if !strings.Contains(contextual.Message, "permission denied") {
 		t.Fatalf("message = %q, want the stderr diagnostic", contextual.Message)
 	}
@@ -468,7 +471,7 @@ func TestOpenCodeParserDedupesStepFinishAndRejectsTerminalToolCalls(t *testing.T
 
 	parser = newOpenCodeParser("m", nil, "generate")
 	for _, line := range []string{
-		`{"type":"text","part":{"id":"prt_t","text":"let me check"}}`,
+		`{"type":"text","sessionID":"ses_1","part":{"id":"prt_t","text":"let me check"}}`,
 		`{"type":"step_finish","part":{"id":"prt_f","reason":"tool-calls"}}`,
 	} {
 		if _, err := parser.event([]byte(line)); err != nil {
@@ -479,6 +482,9 @@ func TestOpenCodeParserDedupesStepFinishAndRejectsTerminalToolCalls(t *testing.T
 	var coreErr *core.Error
 	if !errors.As(err, &coreErr) || coreErr.Code != core.CodeToolCalls {
 		t.Fatalf("want tool_calls error, got %v", err)
+	}
+	if coreErr.SessionID != "ses_1" || coreErr.PartialText != "let me check" {
+		t.Fatalf("missing session or partial text: %+v", coreErr)
 	}
 }
 

@@ -280,6 +280,8 @@ func (p *openCodeParser) response() (*core.Response, error) {
 	if p.finished && p.reason == openCodeReasonToolCalls && p.text.Len() > 0 {
 		err := openCodeResultError(p.operation, core.CodeToolCalls, "opencode ended the turn on a tool call after partial text")
 		err.Reason = p.reason
+		err.SessionID = p.result.ID
+		err.PartialText = p.text.String()
 		return nil, err
 	}
 	// An explicit error finish is a failure signal even when text came first.
@@ -300,6 +302,7 @@ func (p *openCodeParser) response() (*core.Response, error) {
 		case openCodeReasonToolCalls:
 			err := openCodeResultError(p.operation, core.CodeToolCalls, "opencode ended the turn on a tool call without returning text")
 			err.Reason = p.reason
+			err.SessionID = p.result.ID
 			return nil, err
 		case openCodeReasonLength:
 			err := openCodeResultError(p.operation, "max_tokens", "opencode stopped at the output cap before returning text")

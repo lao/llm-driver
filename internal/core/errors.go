@@ -43,6 +43,12 @@ type Error struct {
 	Reason string
 	// Code is the provider or CLI failure code, when available.
 	Code string
+	// SessionID identifies a CLI session when available. It does not prove the
+	// session completed; callers must verify its persisted state independently.
+	SessionID string
+	// PartialText is untrusted output received before a failed CLI turn. It is
+	// omitted from Error() and must not be treated as a completed response.
+	PartialText string
 	// Message is a concise upstream or normalized failure message. CLI errors
 	// may include sanitized, bounded stderr even after exit 0. Sensitive content
 	// (including prompts or credentials) is not redacted; filter before logging.
