@@ -471,7 +471,7 @@ func TestOpenCodeParserDedupesStepFinishAndRejectsTerminalToolCalls(t *testing.T
 
 	parser = newOpenCodeParser("m", nil, "generate")
 	for _, line := range []string{
-		`{"type":"text","part":{"id":"prt_t","text":"let me check"}}`,
+		`{"type":"text","sessionID":"ses_1","part":{"id":"prt_t","text":"let me check"}}`,
 		`{"type":"step_finish","part":{"id":"prt_f","reason":"tool-calls"}}`,
 	} {
 		if _, err := parser.event([]byte(line)); err != nil {
@@ -482,6 +482,9 @@ func TestOpenCodeParserDedupesStepFinishAndRejectsTerminalToolCalls(t *testing.T
 	var coreErr *core.Error
 	if !errors.As(err, &coreErr) || coreErr.Code != core.CodeToolCalls {
 		t.Fatalf("want tool_calls error, got %v", err)
+	}
+	if coreErr.SessionID != "ses_1" || coreErr.PartialText != "let me check" {
+		t.Fatalf("missing session or partial text: %+v", coreErr)
 	}
 }
 
