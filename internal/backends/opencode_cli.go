@@ -300,6 +300,7 @@ func (p *openCodeParser) response() (*core.Response, error) {
 		case openCodeReasonToolCalls:
 			err := openCodeResultError(p.operation, core.CodeToolCalls, "opencode ended the turn on a tool call without returning text")
 			err.Reason = p.reason
+			err.SessionID = p.result.ID
 			return nil, err
 		case openCodeReasonLength:
 			err := openCodeResultError(p.operation, "max_tokens", "opencode stopped at the output cap before returning text")

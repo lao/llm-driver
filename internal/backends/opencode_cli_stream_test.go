@@ -197,6 +197,9 @@ func TestOpenCodeCLIStreamCleanExitCarriesStderr(t *testing.T) {
 	if contextual.Code != core.CodeToolCalls {
 		t.Fatalf("code = %q, want %q", contextual.Code, core.CodeToolCalls)
 	}
+	if contextual.SessionID != "ses_1" {
+		t.Fatalf("session ID = %q, want ses_1", contextual.SessionID)
+	}
 	if !strings.Contains(contextual.Message, "permission denied") {
 		t.Fatalf("message = %q, want the stderr diagnostic", contextual.Message)
 	}
