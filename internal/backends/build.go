@@ -11,6 +11,7 @@ type apiBackendConfig struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
+	openAI     core.OpenAIOptions
 }
 
 type cliBackendConfig struct {
@@ -55,6 +56,7 @@ func New(config core.Config, runner core.CommandRunner) (core.Backend, error) {
 		apiKey:     config.APIKey,
 		baseURL:    config.BaseURL,
 		httpClient: config.HTTPClient,
+		openAI:     config.OpenAI,
 	}
 	cliConfig := cliBackendConfig{
 		acceptUnverified: config.AcceptUnverifiedOpenCode,

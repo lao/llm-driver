@@ -184,6 +184,15 @@ application configuration because they control local process execution.
 `opencode` is CLI-only: its upstream providers and credentials are whatever the
 local opencode is configured for.
 
+The OpenAI Responses API stores requests and responses by default. Set
+`Config.OpenAI.DisableStore` to send `store: false` for data that should not be
+retained:
+
+```go
+llmdriver.Config{Provider: llmdriver.ProviderOpenAI, Flavor: llmdriver.FlavorAPI,
+	Model: "gpt-5.6-sol", OpenAI: llmdriver.OpenAIOptions{DisableStore: true}}
+```
+
 Errors carry provider, flavor, operation, status, and provider code when those
 values are available. Use `errors.Is` for sentinels such as
 `ErrInvalidRequest` and `ErrExecutableNotFound`, and `errors.As` for `*Error`.

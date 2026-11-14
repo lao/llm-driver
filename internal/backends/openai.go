@@ -17,8 +17,9 @@ import (
 )
 
 type openAIBackend struct {
-	client openai.Client
-	model  string
+	client       openai.Client
+	model        string
+	disableStore bool
 }
 
 func newOpenAIBackend(config apiBackendConfig) *openAIBackend {
@@ -33,8 +34,9 @@ func newOpenAIBackend(config apiBackendConfig) *openAIBackend {
 		options = append(options, option.WithHTTPClient(config.httpClient))
 	}
 	return &openAIBackend{
-		client: openai.NewClient(options...),
-		model:  config.model,
+		client:       openai.NewClient(options...),
+		model:        config.model,
+		disableStore: config.openAI.DisableStore,
 	}
 }
 
@@ -94,6 +96,9 @@ func (b *openAIBackend) params(request core.Request) responses.ResponseNewParams
 		},
 		Model:           openai.ResponsesModel(b.model),
 		MaxOutputTokens: openai.Int(int64(request.MaxTokens)),
+	}
+	if b.disableStore {
+		params.Store = openai.Bool(false)
 	}
 	if request.System != "" {
 		params.Instructions = openai.String(request.System)

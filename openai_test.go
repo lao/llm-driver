@@ -715,3 +715,38 @@ func TestOpenAIGenerateRejectsFailedTerminalResult(t *testing.T) {
 		t.Fatalf("error code = %q, want %q", target.Code, "server_error")
 	}
 }
+
+func TestOpenAIDisableStore(t *testing.T) {
+	t.Parallel()
+
+	const response = `{
+  "id":"resp_s","object":"response","status":"completed","model":"gpt-test",
+  "output":[{"id":"m","type":"message","status":"completed","role":"assistant",
+    "content":[{"type":"output_text","text":"ok","annotations":[],"logprobs":[]}]}],
+  "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+}`
+	for _, disable := range []bool{false, true} {
+		server, captured := newAPITestServer(t, http.StatusOK, response)
+		client, err := New(Config{
+			Provider: ProviderOpenAI,
+			Flavor:   FlavorAPI,
+			Model:    "gpt-test",
+			APIKey:   "test-key",
+			BaseURL:  server.URL,
+			OpenAI:   OpenAIOptions{DisableStore: disable},
+		})
+		if err != nil {
+			t.Fatalf("New(): %v", err)
+		}
+		if _, err := client.Generate(context.Background(), Request{MaxTokens: 64, Messages: []Message{User("q")}}); err != nil {
+			t.Fatalf("Generate(): %v", err)
+		}
+		store, sent := captured.body["store"]
+		if disable && store != false {
+			t.Fatalf("DisableStore: store = %#v, want false", store)
+		}
+		if !disable && sent {
+			t.Fatalf("default: store sent as %#v, want omitted", store)
+		}
+	}
+}
