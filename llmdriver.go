@@ -16,6 +16,8 @@ type (
 	ClaudeOptions = core.ClaudeOptions
 	// CodexOptions carries Codex CLI flags for a CLI-flavored client.
 	CodexOptions = core.CodexOptions
+	// OpenAIOptions carries OpenAI API settings for an API-flavored client.
+	OpenAIOptions = core.OpenAIOptions
 	// Role identifies the author of a Message.
 	Role = core.Role
 	// Message is one text turn in a generation request.

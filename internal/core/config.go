@@ -58,6 +58,16 @@ type CodexOptions struct {
 	OmitSandbox bool
 }
 
+// OpenAIOptions carries OpenAI API settings. It is ignored by CLI flavors and
+// other providers. The zero value preserves the API's default behavior.
+type OpenAIOptions struct {
+	// DisableStore sends store=false, so the Responses API does not store the
+	// response for later retrieval (it does by default). It is not a
+	// zero-retention guarantee: OpenAI may still keep abuse-monitoring logs
+	// under the account's data controls.
+	DisableStore bool
+}
+
 // Config selects a provider, transport flavor, and model for a Client.
 type Config struct {
 	// Provider selects Claude, OpenAI, or opencode.
@@ -96,6 +106,8 @@ type Config struct {
 	Claude ClaudeOptions
 	// Codex carries Codex CLI flags. Ignored by API flavors and Claude.
 	Codex CodexOptions
+	// OpenAI carries OpenAI API settings. Ignored by CLI flavors and Claude.
+	OpenAI OpenAIOptions
 }
 
 func (c Config) validate() error {
