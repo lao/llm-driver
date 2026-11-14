@@ -61,8 +61,10 @@ type CodexOptions struct {
 // OpenAIOptions carries OpenAI API settings. It is ignored by CLI flavors and
 // other providers. The zero value preserves the API's default behavior.
 type OpenAIOptions struct {
-	// DisableStore sends store=false so OpenAI does not retain the request and
-	// response (the Responses API stores them by default).
+	// DisableStore sends store=false, so the Responses API does not store the
+	// response for later retrieval (it does by default). It is not a
+	// zero-retention guarantee: OpenAI may still keep abuse-monitoring logs
+	// under the account's data controls.
 	DisableStore bool
 }
 
